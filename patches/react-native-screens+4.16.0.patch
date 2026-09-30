@@ -1,0 +1,120 @@
+diff --git a/node_modules/react-native-screens/ios/RNSScreenStack.mm b/node_modules/react-native-screens/ios/RNSScreenStack.mm
+index 229dc58..d36a9fe 100644
+--- a/node_modules/react-native-screens/ios/RNSScreenStack.mm
++++ b/node_modules/react-native-screens/ios/RNSScreenStack.mm
+@@ -43,6 +43,107 @@
+ namespace react = facebook::react;
+ #endif // RCT_NEW_ARCH_ENABLED
+ 
++#pragma mark - iOS 18 zoom transition (bread-app patch)
++
++/**
++ * SPIKE PATCH — not upstream react-native-screens.
++ *
++ * `react-native-screens` exposes no way to ask for UIKit's iOS 18 zoom
++ * transition (`UIViewController.preferredTransition = .zoom`): there is no
++ * `zoom` in `StackAnimationTypes`, and no channel for naming the source view a
++ * transition should grow out of.
++ *
++ * Rather than add a prop — which would mean patching `@react-navigation/
++ * native-stack` and expo-router to thread it through, plus a codegen change —
++ * this reads the source view straight off the view hierarchy. JS marks the row
++ * it is about to open with `testID="rns-zoom-source"` (which React Native maps
++ * to `accessibilityIdentifier`), and the push below picks it up. One marker at
++ * a time; the first match in the window wins.
++ *
++ * `preferredTransition` lives on the DESTINATION view controller and drives the
++ * dismissal as well as the entrance, so it is set once, just before pushing.
++ *
++ * Push only. UIKit offers the zoom's interactive pull-down dismissal solely to
++ * a PRESENTED view controller, and every modal style that provides it renders
++ * as a sheet — so this path deliberately keeps the full screen and dismisses
++ * with the edge-swipe back, which zooms out to the source row all the same.
++ *
++ * Only takes effect when the delegate below returns no custom animator — i.e.
++ * `stackAnimation: 'default'`. Any other animation means the screen has asked
++ * for something else and UIKit's transition would be ignored anyway.
++ */
++static NSString *const RNSZoomSourceIdentifier = @"rns-zoom-source";
++/// Optional counterpart in the DESTINATION: the element the source row should
++/// land on. See `alignmentRectProvider` below for why it matters.
++static NSString *const RNSZoomTargetIdentifier = @"rns-zoom-target";
++
++static UIView *RNSFindMarkedView(UIView *root, NSString *identifier)
++{
++  if ([identifier isEqualToString:root.accessibilityIdentifier]) {
++    return root;
++  }
++  // Hidden or detached subtrees hold stale markers — a row scrolled out of a
++  // recycled list still carries its props.
++  if (root.hidden || root.alpha < 0.01) {
++    return nil;
++  }
++  for (UIView *subview in root.subviews) {
++    UIView *found = RNSFindMarkedView(subview, identifier);
++    if (found != nil) {
++      return found;
++    }
++  }
++  return nil;
++}
++
++static void RNSApplyZoomTransitionIfMarked(UIViewController *destination, UIView *hostView)
++{
++  if (@available(iOS 18.0, *)) {
++    UIView *root = hostView.window ?: hostView;
++    UIView *source = RNSFindMarkedView(root, RNSZoomSourceIdentifier);
++    if (source == nil) {
++      return;
++    }
++    UIZoomTransitionOptions *options = [UIZoomTransitionOptions new];
++
++    /*
++     * Where in the destination the row should land.
++     *
++     * Left to itself UIKit aligns the source to the top-left of the zoomed view
++     * controller's view — which on a screen with a safe-area gap and its own
++     * top padding is empty space, so the transition opens on a blank card and
++     * the real header slides in late. Marking the destination's header with
++     * `testID="rns-zoom-target"` points UIKit at the content that actually
++     * corresponds to the row, and the row then morphs straight into it.
++     *
++     * `CGRectNull` means "no preference", which is the correct answer whenever
++     * the destination has not marked anything.
++     */
++    options.alignmentRectProvider = ^CGRect(UIZoomTransitionAlignmentRectContext *context) {
++      UIView *zoomedView = context.zoomedViewController.viewIfLoaded;
++      if (zoomedView == nil) {
++        return CGRectNull;
++      }
++      UIView *target = RNSFindMarkedView(zoomedView, RNSZoomTargetIdentifier);
++      if (target == nil) {
++        return CGRectNull;
++      }
++      return [target convertRect:target.bounds toView:zoomedView];
++    };
++
++    // Weak: the provider is called repeatedly for the life of the transition —
++    // including the pop, long after the row may have been unmounted. Returning
++    // nil then makes UIKit fall back to its default, which is the right
++    // behaviour for a source that no longer exists.
++    __weak UIView *weakSource = source;
++    destination.preferredTransition =
++        [UIViewControllerTransition zoomWithOptions:options
++                                 sourceViewProvider:^UIView *(UIZoomTransitionSourceViewProviderContext *context) {
++                                   return weakSource;
++                                 }];
++  }
++}
++
+ @interface RNSScreenStackView () <
+     UINavigationControllerDelegate,
+     UIAdaptivePresentationControllerDelegate,
+@@ -857,6 +958,7 @@ - (void)setPushViewControllers:(NSArray<UIViewController *> *)controllers
+       [newControllers removeLastObject];
+ 
+       [_controller setViewControllers:newControllers animated:NO];
++      RNSApplyZoomTransitionIfMarked(top, self);
+       [_controller pushViewController:top animated:YES];
+     } else {
+       // don't really know what this case could be, but may need to handle it
