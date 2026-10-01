@@ -44,7 +44,9 @@ https://docs.solanamobile.com/get-started/development-setup.
 
 ## Environment
 
-The same variables as bread-mobile are set per profile in `eas.json` (gitignored):
+EAS builds read these from `eas.json`, set per profile. Local `expo start` does
+**not** read `eas.json`; it reads `.env` (copy it from `bread-mobile/.env`). Both
+files are gitignored. The variables are the same as bread-mobile's:
 
 ```bash
 EXPO_PUBLIC_API_URL=https://bread-be.vercel.app
