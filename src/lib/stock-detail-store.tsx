@@ -1,4 +1,5 @@
 import { useRouter } from 'expo-router';
+import { Platform } from 'react-native';
 import React, {
   createContext,
   useCallback,
@@ -89,6 +90,14 @@ export function StockDetailProvider({
       // full-screen modal instead. Besides producing the intended bottom-edge
       // entrance, this keeps the trade pad out of a nested bottom sheet where
       // the parent pan gesture can cancel slide-to-confirm.
+      // Android has no UIKit zoom, and the JS zoom (a transparent modal that
+      // scales a heavy screen while the list keeps rendering underneath) is the
+      // most expensive transition in the app there. Push the plain native
+      // route instead; it gets the platform's own transition.
+      if (Platform.OS === 'android') {
+        router.push('/stock-detail-native');
+        return;
+      }
       const hasNativeSource = Boolean(options?.nativeSourceKey || options?.source);
       if (NATIVE_ZOOM_SPIKE && hasNativeSource) {
         // The native route grows out of the row UIKit finds marked in the view

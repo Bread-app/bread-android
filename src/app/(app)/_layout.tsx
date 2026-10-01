@@ -22,6 +22,7 @@ import { SavedStoreProvider } from '@/lib/saved-store';
 import { ToastProvider } from '@/lib/toast-store';
 import { TradeFxProvider } from '@/lib/trade-fx';
 import { WalletStoreProvider } from '@/lib/wallet-store';
+import { PUSH_TRANSITION } from '@/lib/screen-transitions';
 import { useThemeStore } from '@/lib/theme-store';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
 import type { ThemeColors } from '@/constants/theme';
@@ -129,8 +130,7 @@ export default function ProtectedAppLayout() {
                       headerTintColor: colors.icon,
                       headerTitleStyle: { color: colors.text },
                       headerTitle: '',
-                      animation: 'slide_from_right',
-                      animationDuration: 200,
+                      ...PUSH_TRANSITION,
                     }}
                   />
                   {/* One news story opened from the News tab — same native
@@ -145,8 +145,7 @@ export default function ProtectedAppLayout() {
                       headerTintColor: colors.icon,
                       headerTitleStyle: { color: colors.text },
                       headerTitle: '',
-                      animation: 'slide_from_right',
-                      animationDuration: 200,
+                      ...PUSH_TRANSITION,
                     }}
                   />
                   {/* Another user's profile. A real stack screen (it used to be
@@ -162,8 +161,7 @@ export default function ProtectedAppLayout() {
                       headerTintColor: colors.icon,
                       headerTitleStyle: { color: colors.text },
                       headerTitle: '',
-                      animation: 'slide_from_right',
-                      animationDuration: 200,
+                      ...PUSH_TRANSITION,
                     }}
                   />
                   {/* "New sandwich" composer — full-screen push (same side-slide as
@@ -173,8 +171,7 @@ export default function ProtectedAppLayout() {
                     name="sandwich-composer"
                     options={{
                       headerShown: false,
-                      animation: 'slide_from_right',
-                      animationDuration: 200,
+                      ...PUSH_TRANSITION,
                       gestureEnabled: false,
                     }}
                   />
@@ -191,8 +188,7 @@ export default function ProtectedAppLayout() {
                       headerTintColor: colors.icon,
                       headerTitleStyle: { color: colors.text },
                       headerTitle: '',
-                      animation: 'slide_from_right',
-                      animationDuration: 200,
+                      ...PUSH_TRANSITION,
                     }}
                   />
                   {/* Minimal account editor (avatar / username / bio). Native
@@ -207,8 +203,7 @@ export default function ProtectedAppLayout() {
                       headerBackButtonDisplayMode: 'minimal',
                       headerTintColor: colors.icon,
                       headerTitle: '',
-                      animation: 'slide_from_right',
-                      animationDuration: 200,
+                      ...PUSH_TRANSITION,
                     }}
                   />
                   {/* Holder thesis composer. Same treatment as the account
@@ -223,8 +218,7 @@ export default function ProtectedAppLayout() {
                       headerBackButtonDisplayMode: 'minimal',
                       headerTintColor: colors.icon,
                       headerTitle: '',
-                      animation: 'slide_from_right',
-                      animationDuration: 200,
+                      ...PUSH_TRANSITION,
                     }}
                   />
                   {/* Profile-menu destinations. Both own their compact header
@@ -233,16 +227,14 @@ export default function ProtectedAppLayout() {
                     name="settings"
                     options={{
                       headerShown: false,
-                      animation: 'slide_from_right',
-                      animationDuration: 200,
+                      ...PUSH_TRANSITION,
                     }}
                   />
                   <Stack.Screen
                     name="activity"
                     options={{
                       headerShown: false,
-                      animation: 'slide_from_right',
-                      animationDuration: 200,
+                      ...PUSH_TRANSITION,
                     }}
                   />
                   {/* Closing leftover accounts from fully-exited positions.
@@ -252,8 +244,7 @@ export default function ProtectedAppLayout() {
                     name="cleanup-wallet"
                     options={{
                       headerShown: false,
-                      animation: 'slide_from_right',
-                      animationDuration: 200,
+                      ...PUSH_TRANSITION,
                     }}
                   />
                   {/* The notification inbox and its per-category settings. Both
@@ -265,8 +256,7 @@ export default function ProtectedAppLayout() {
                     name="notifications"
                     options={{
                       headerShown: false,
-                      animation: 'slide_from_right',
-                      animationDuration: 200,
+                      ...PUSH_TRANSITION,
                     }}
                   />
                   {/* Asset detail, presented with the iOS-18-style zoom: the
@@ -361,8 +351,7 @@ export default function ProtectedAppLayout() {
                     name="notification-settings"
                     options={{
                       headerShown: false,
-                      animation: 'slide_from_right',
-                      animationDuration: 200,
+                      ...PUSH_TRANSITION,
                     }}
                   />
                 </Stack>

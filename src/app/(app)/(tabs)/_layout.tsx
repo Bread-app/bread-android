@@ -96,7 +96,13 @@ export default function TabsLayout() {
     return (
       <Tabs
         tabBar={(props) => <FloatingTabBar {...props} />}
-        screenOptions={{ headerShown: false }}>
+        screenOptions={{
+          headerShown: false,
+          // Hidden tabs stay mounted; freezing them stops wallet/price polling
+          // from re-rendering screens nobody can see — the main source of
+          // dropped frames on mid-range Android.
+          freezeOnBlur: Platform.OS === 'android',
+        }}>
         <Tabs.Screen name="home" />
         <Tabs.Screen name="sandwich" />
         <Tabs.Screen name="wallet" />

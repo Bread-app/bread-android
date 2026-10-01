@@ -1,6 +1,7 @@
 import { Stack } from 'expo-router';
 import React from 'react';
 
+import { PUSH_TRANSITION } from '@/lib/screen-transitions';
 import { useThemeStore } from '@/lib/theme-store';
 
 export default function OnboardingLayout() {
@@ -12,8 +13,7 @@ export default function OnboardingLayout() {
         // Onboarding is a linear multi-step flow — the native side-push makes
         // each step read as forward progress (and swipe-back as going back)
         // instead of a hard cut between screens.
-        animation: 'slide_from_right',
-        animationDuration: 250,
+        ...PUSH_TRANSITION,
         contentStyle: { backgroundColor: colors.background },
       }}
     />
