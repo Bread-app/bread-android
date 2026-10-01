@@ -26,11 +26,12 @@ const MUTED_ICON_MASK = Platform.OS === 'ios'
   : '#FFFFFF';
 
 /**
- * Only iOS below 26 swaps navigators. Android keeps the native Material tab bar
- * it has always had — it is a different design language, and pushing an iOS 26
- * silhouette onto it would be a change nobody asked for.
+ * Everything except iOS 26 draws the floating glass bar by hand. Android has
+ * no Liquid Glass, and its native Material bar is flat edge-to-edge chrome,
+ * so Bread for Android uses the same floating capsules as older iOS to keep
+ * one design across platforms.
  */
-const USE_FLOATING_TAB_BAR = Platform.OS === 'ios' && !HAS_LIQUID_GLASS;
+const USE_FLOATING_TAB_BAR = Platform.OS === 'android' || !HAS_LIQUID_GLASS;
 
 const MutedFoundation = {
   getImageSource: (

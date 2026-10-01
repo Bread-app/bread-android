@@ -3,8 +3,10 @@ import Foundation from '@expo/vector-icons/Foundation';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
-import React from 'react';
-import { Image, Platform, Pressable, StyleSheet, View } from 'react-native';
+import * as Haptics from 'expo-haptics';
+import React, { useEffect, useRef, useState } from 'react';
+import { Image, type LayoutChangeEvent, Platform, Pressable, StyleSheet, View } from 'react-native';
+import Animated, { useAnimatedStyle, useSharedValue, withSpring, withTiming } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useThemeStore } from '@/lib/theme-store';
@@ -15,6 +17,14 @@ const SIDE_MARGIN = 20;
 /** Separates the search capsule from the main one, as the iOS 26 bar does. */
 const GROUP_GAP = 8;
 const SEARCH_WIDTH = 64;
+const SELECTION_HEIGHT = 40;
+/** Gap between the sliding lens and its tab's edges. */
+const LENS_INSET = 6;
+
+const IS_ANDROID = Platform.OS === 'android';
+
+// iOS-feel spring for the selection lens: ~0.35s response, ~0.8 damping.
+const LENS_SPRING = { stiffness: 320, damping: 29, mass: 1 };
 
 /** Left-to-right, matching the native bar. `search` is drawn separately. */
 const MAIN_TABS = ['home', 'sandwich', 'wallet', 'profile'] as const;
@@ -84,6 +94,40 @@ export function FloatingTabBar({ state, descriptors, navigation }: BottomTabBarP
 
   const routeByName = new Map(state.routes.map((route) => [route.name, route]));
 
+  // One lens for the main capsule that SLIDES between tabs (the iOS 26 bar's
+  // selection), instead of a chip that blinks from tab to tab.
+  const activeName = state.routes[state.index]?.name;
+  const mainIndex = MAIN_TABS.indexOf(activeName as (typeof MAIN_TABS)[number]);
+  const [mainWidth, setMainWidth] = useState(0);
+  const tabWidth = mainWidth / MAIN_TABS.length;
+  const lensX = useSharedValue(0);
+  const lensOpacity = useSharedValue(mainIndex >= 0 ? 1 : 0);
+  const measured = mainWidth > 0;
+  // Snap (don't spring) on the first placement and when returning from the
+  // search tab, so the lens never flies in from the capsule's edge.
+  const lensPlaced = useRef(false);
+
+  useEffect(() => {
+    if (!measured) return;
+    if (mainIndex >= 0) {
+      const target = mainIndex * tabWidth + LENS_INSET;
+      const snap = !lensPlaced.current || lensOpacity.value < 0.5;
+      lensX.value = snap ? target : withSpring(target, LENS_SPRING);
+      lensPlaced.current = true;
+    }
+    lensOpacity.value = withTiming(mainIndex >= 0 ? 1 : 0, { duration: 160 });
+  }, [lensOpacity, lensX, mainIndex, measured, tabWidth]);
+
+  const lensStyle = useAnimatedStyle(() => ({
+    opacity: lensOpacity.value,
+    transform: [{ translateX: lensX.value }],
+  }));
+
+  const onMainLayout = (event: LayoutChangeEvent) => {
+    const next = Math.round(event.nativeEvent.layout.width);
+    if (next > 0 && next !== mainWidth) setMainWidth(next);
+  };
+
   const onPress = (routeName: string) => {
     const route = routeByName.get(routeName);
     if (!route) {
@@ -96,6 +140,7 @@ export function FloatingTabBar({ state, descriptors, navigation }: BottomTabBarP
       canPreventDefault: true,
     });
     if (!isFocused && !event.defaultPrevented) {
+      void Haptics.selectionAsync();
       navigation.navigate(route.name);
     }
   };
@@ -103,7 +148,7 @@ export function FloatingTabBar({ state, descriptors, navigation }: BottomTabBarP
   const isActive = (routeName: string) =>
     state.routes[state.index]?.name === routeName;
 
-  const renderTab = (routeName: string, style?: object) => {
+  const renderTab = (routeName: string, style?: object, ownSelection = true) => {
     const route = routeByName.get(routeName);
     if (!route) {
       return null;
@@ -122,7 +167,7 @@ export function FloatingTabBar({ state, descriptors, navigation }: BottomTabBarP
         <View
           style={[
             styles.selection,
-            focused && { backgroundColor: selectionColor },
+            ownSelection && focused && { backgroundColor: selectionColor },
           ]}>
           <TabIcon name={routeName} color={focused ? activeColor : inactiveColor} />
         </View>
@@ -131,12 +176,28 @@ export function FloatingTabBar({ state, descriptors, navigation }: BottomTabBarP
   };
 
   const capsule = (children: React.ReactNode, extraStyle?: object) => (
-    <View style={[styles.capsule, extraStyle]}>
-      {/* The real UIKit material, not a hand-mixed grey — it is what makes the
-          content behind bloom through the way Liquid Glass does. */}
+    // The shadow lives on an OUTER, unclipped view. On Android, `elevation` on
+    // the translucent capsule itself paints its shadow through the glass as a
+    // grey smear; `boxShadow` outside the clip keeps it under the edge only.
+    <View style={[styles.capsuleShadow, extraStyle]}>
+    <View style={styles.capsule}>
+      {/* The real platform blur, not a hand-mixed grey — it is what makes the
+          content behind bloom through the way Liquid Glass does. Android only
+          truly blurs with the Dimezis method; without it expo-blur falls back
+          to a flat translucent tint and the bar stops reading as glass. */}
       <BlurView
-        intensity={isDark ? 70 : 90}
-        tint={isDark ? 'systemThinMaterialDark' : 'systemThinMaterialLight'}
+        intensity={IS_ANDROID ? (isDark ? 60 : 72) : isDark ? 70 : 90}
+        tint={
+          IS_ANDROID
+            ? isDark
+              ? 'dark'
+              : 'light'
+            : isDark
+              ? 'systemThinMaterialDark'
+              : 'systemThinMaterialLight'
+        }
+        experimentalBlurMethod={IS_ANDROID ? 'dimezisBlurView' : undefined}
+        blurReductionFactor={IS_ANDROID ? 3 : undefined}
         style={StyleSheet.absoluteFill}
       />
       <View
@@ -159,6 +220,7 @@ export function FloatingTabBar({ state, descriptors, navigation }: BottomTabBarP
       />
       {children}
     </View>
+    </View>
   );
 
   return (
@@ -170,8 +232,18 @@ export function FloatingTabBar({ state, descriptors, navigation }: BottomTabBarP
       ]}>
       <View pointerEvents="box-none" style={styles.row}>
         {capsule(
-          <View style={styles.mainTabs}>
-            {MAIN_TABS.map((name) => renderTab(name))}
+          <View style={styles.mainTabs} onLayout={onMainLayout}>
+            {measured ? (
+              <Animated.View
+                pointerEvents="none"
+                style={[
+                  styles.lens,
+                  { width: tabWidth - LENS_INSET * 2, backgroundColor: selectionColor },
+                  lensStyle,
+                ]}
+              />
+            ) : null}
+            {MAIN_TABS.map((name) => renderTab(name, undefined, !measured))}
           </View>,
           styles.mainCapsule,
         )}
@@ -194,11 +266,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: SIDE_MARGIN,
     gap: GROUP_GAP,
   },
-  capsule: {
+  capsuleShadow: {
     height: BAR_HEIGHT,
     borderRadius: BAR_HEIGHT / 2,
-    overflow: 'hidden',
-    justifyContent: 'center',
     ...Platform.select({
       ios: {
         shadowColor: '#000',
@@ -206,8 +276,21 @@ const styles = StyleSheet.create({
         shadowRadius: 16,
         shadowOffset: { width: 0, height: 6 },
       },
-      android: { elevation: 6 },
+      android: { boxShadow: '0px 6px 18px rgba(0,0,0,0.14)' },
     }),
+  },
+  capsule: {
+    flex: 1,
+    borderRadius: BAR_HEIGHT / 2,
+    overflow: 'hidden',
+    justifyContent: 'center',
+  },
+  lens: {
+    position: 'absolute',
+    left: 0,
+    top: (BAR_HEIGHT - SELECTION_HEIGHT) / 2,
+    height: SELECTION_HEIGHT,
+    borderRadius: SELECTION_HEIGHT / 2,
   },
   mainCapsule: {
     flex: 1,
@@ -230,6 +313,7 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
   },
   mainTabs: {
+    height: BAR_HEIGHT,
     flexDirection: 'row',
     alignItems: 'center',
   },
@@ -239,7 +323,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   selection: {
-    height: 40,
+    height: SELECTION_HEIGHT,
     minWidth: 56,
     borderRadius: 20,
     alignItems: 'center',

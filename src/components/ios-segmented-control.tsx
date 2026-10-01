@@ -1,16 +1,9 @@
 import React, { useCallback, useState } from 'react';
 import { Host, Picker } from '@expo/ui/swift-ui';
 import { frame } from '@expo/ui/swift-ui/modifiers';
-import {
-  LayoutChangeEvent,
-  Platform,
-  Pressable,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { LayoutChangeEvent, Platform, StyleSheet, View } from 'react-native';
 
-import { Fonts, type ThemeColors } from '@/constants/theme';
+import { SegmentedPicker } from '@/components/segmented-picker';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
 
 /**
@@ -21,8 +14,8 @@ import { useThemedStyles } from '@/hooks/use-themed-styles';
  * one. That distinction matters more than it sounds: a hand-rolled track and
  * thumb can land within a couple of points of UIKit and still feel wrong,
  * because what it misses is the press states, the thumb's drag behaviour,
- * Dynamic Type and the system animation curve. Everything off iOS falls back to
- * the same pill the market toggle uses.
+ * Dynamic Type and the system animation curve. Android draws the iOS look by
+ * hand with `SegmentedPicker` (sliding thumb, single-line labels).
  *
  * The width is MEASURED rather than fixed. SwiftUI's `frame` needs a number,
  * but this control sits at the trailing edge of a row whose leading content
@@ -78,65 +71,21 @@ export function IosSegmentedControl<T extends string>({
   }
 
   return (
-    <View style={styles.container} accessibilityLabel={accessibilityLabel}>
-      {options.map((option) => {
-        const selected = option === value;
-        return (
-          <Pressable
-            key={option}
-            accessibilityRole="button"
-            accessibilityLabel={option}
-            accessibilityState={{ selected }}
-            onPress={() => {
-              if (!selected) onChange(option);
-            }}
-            style={({ pressed }) => [
-              styles.option,
-              selected && styles.optionSelected,
-              pressed && !selected && styles.optionPressed,
-            ]}
-          >
-            <Text style={[styles.label, selected && styles.labelSelected]}>{option}</Text>
-          </Pressable>
-        );
-      })}
-    </View>
+    <SegmentedPicker
+      options={options}
+      value={value}
+      onChange={onChange}
+      height={CONTROL_HEIGHT}
+      // Its row sizes to content, so a flexible track would collapse here.
+      width={DEFAULT_WIDTH}
+      accessibilityLabel={accessibilityLabel}
+    />
   );
 }
 
-// The fallback mirrors AssetMarketToggle's pill exactly — same radii, same
-// selected-fill-is-the-text-colour inversion — so a non-iOS build does not grow
-// a second visual language for the same idea.
-const makeStyles = (c: ThemeColors) =>
+const makeStyles = () =>
   StyleSheet.create({
     hostWrap: {
       height: CONTROL_HEIGHT,
     },
-    container: {
-      height: CONTROL_HEIGHT,
-      padding: 2,
-      borderRadius: CONTROL_HEIGHT / 2,
-      backgroundColor: c.surfaceAlt,
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: c.border,
-      flexDirection: 'row',
-      alignItems: 'center',
-    },
-    option: {
-      flex: 1,
-      height: CONTROL_HEIGHT - 6,
-      paddingHorizontal: 10,
-      borderRadius: (CONTROL_HEIGHT - 6) / 2,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    optionSelected: { backgroundColor: c.text },
-    optionPressed: { backgroundColor: c.surface },
-    label: {
-      color: c.textTertiary,
-      fontSize: 12,
-      fontWeight: '800',
-      fontFamily: Fonts.rounded,
-    },
-    labelSelected: { color: c.textInverse },
   });
