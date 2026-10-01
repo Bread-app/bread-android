@@ -19,7 +19,7 @@ Built to the Solana Mobile docs: https://docs.solanamobile.com/llms.txt
 | Crypto polyfill | `polyfill.js`, first import in `entrypoint.js` | `react-native-quick-crypto` `install()`, as the MWA setup docs require. |
 | dApp Store | `dapp-store/README.md`, `eas.json` → `dapp-store` | Signed APK, separate signing key, publishing CLI. |
 
-Removed from the iOS app: Apple sign-in, the iOS Notification Service Extension,
+Removed from the iOS app: the Apple sign-in button (the `expo-apple-authentication` package stays, because Privy imports it on every platform), the iOS Notification Service Extension,
 and Apple Pay copy (the on-ramp is shown as "Card"). The iOS 26 Liquid Glass and
 SwiftUI components are still in the code, but they fall back to plain RN views
 on Android.
