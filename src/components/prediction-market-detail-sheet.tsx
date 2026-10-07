@@ -1,4 +1,5 @@
 import { BottomSheetBackdrop, BottomSheetModal, BottomSheetScrollView } from '@gorhom/bottom-sheet';
+import { SheetModal } from '@/components/sheet-modal';
 import React, {
   forwardRef,
   useCallback,
@@ -597,7 +598,7 @@ export const PredictionMarketDetailSheet = forwardRef<
   );
 
   return (
-    <BottomSheetModal
+    <SheetModal
       ref={sheetRef}
       name="prediction-market-detail-sheet"
       index={0}
@@ -827,7 +828,7 @@ export const PredictionMarketDetailSheet = forwardRef<
           </>
         ) : null}
       </View>
-    </BottomSheetModal>
+    </SheetModal>
   );
 });
 

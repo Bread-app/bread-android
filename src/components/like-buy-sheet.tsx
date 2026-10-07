@@ -11,6 +11,7 @@ import {
   View,
 } from "react-native";
 import { BottomSheetBackdrop, BottomSheetModal, BottomSheetView } from "@gorhom/bottom-sheet";
+import { SheetModal } from "@/components/sheet-modal";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { AssetLogo } from "@/components/asset-logo";
@@ -240,7 +241,7 @@ export function LikeBuySheet() {
   const buyDisabled = !buy.canBuy || buy.buying;
 
   return (
-    <BottomSheetModal
+    <SheetModal
       ref={sheetRef}
       enableDynamicSizing
       enablePanDownToClose={!buy.buying}
@@ -379,7 +380,7 @@ export function LikeBuySheet() {
           </PressableScale>
         </View>
       </BottomSheetView>
-    </BottomSheetModal>
+    </SheetModal>
   );
 }
 

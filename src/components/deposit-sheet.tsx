@@ -4,6 +4,7 @@ import {
   BottomSheetView,
   type BottomSheetBackgroundProps,
 } from '@gorhom/bottom-sheet';
+import { SheetModal } from '@/components/sheet-modal';
 
 import { BlurBackdrop } from '@/components/blur-backdrop';
 import { GlassSheetSurface } from '@/components/glass-sheet-surface';
@@ -1079,7 +1080,7 @@ export const DepositSheet = forwardRef<DepositSheetRef, Props>(function DepositS
   const dismiss = useCallback(() => sheetRef.current?.dismiss(), []);
 
   return (
-    <BottomSheetModal
+    <SheetModal
       ref={sheetRef}
       enableDynamicSizing
       maxDynamicContentSize={maxSheetContentHeight}
@@ -1097,7 +1098,7 @@ export const DepositSheet = forwardRef<DepositSheetRef, Props>(function DepositS
           depositAddresses={depositAddresses}
         />
       </BottomSheetView>
-    </BottomSheetModal>
+    </SheetModal>
   );
 });
 

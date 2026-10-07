@@ -1,4 +1,5 @@
 import { BottomSheetBackdrop, BottomSheetModal, BottomSheetView } from '@gorhom/bottom-sheet';
+import { SheetModal } from '@/components/sheet-modal';
 import { useEmbeddedEthereumWallet } from '@privy-io/expo';
 import React, { useCallback, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import { StyleSheet, Text, View, useWindowDimensions } from 'react-native';
@@ -149,7 +150,7 @@ export const HyperliquidPositionSheet = React.forwardRef<
   const pnlColor = (position?.unrealizedPnlUsd ?? 0) >= 0 ? colors.positive : colors.negative;
 
   return (
-    <BottomSheetModal
+    <SheetModal
       ref={sheetRef}
       snapPoints={snapPoints}
       enableDynamicSizing={false}
@@ -206,7 +207,7 @@ export const HyperliquidPositionSheet = React.forwardRef<
           </>
         ) : null}
       </BottomSheetView>
-    </BottomSheetModal>
+    </SheetModal>
   );
 });
 

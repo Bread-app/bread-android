@@ -23,6 +23,7 @@ import {
   BottomSheetScrollView,
   BottomSheetTextInput,
 } from "@gorhom/bottom-sheet";
+import { SheetModal } from "@/components/sheet-modal";
 import { useEmbeddedSolanaWallet, useSigners } from "@privy-io/expo";
 import { useFocusEffect } from "@react-navigation/native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -704,7 +705,7 @@ export function AutoBuyScreen({ showBackButton = true }: { showBackButton?: bool
       <WithdrawSheet ref={withdrawSheetRef} />
 
       {/* Like to Buy settings live in a drawer on the wallet tab. */}
-      <BottomSheetModal
+      <SheetModal
         ref={likeToBuySheetRef}
         snapPoints={likeToBuySnapPoints}
         enableDynamicSizing={false}
@@ -737,7 +738,7 @@ export function AutoBuyScreen({ showBackButton = true }: { showBackButton?: bool
           </View>
           {renderSettings(true)}
         </BottomSheetScrollView>
-      </BottomSheetModal>
+      </SheetModal>
     </View>
   );
 }

@@ -1,4 +1,5 @@
 import { BottomSheetBackdrop, BottomSheetModal, BottomSheetScrollView } from '@gorhom/bottom-sheet';
+import { SheetModal } from '@/components/sheet-modal';
 import { isGlassEffectAPIAvailable } from 'expo-glass-effect';
 import { LinearGradient } from 'expo-linear-gradient';
 import { NotificationTweet } from '@/components/notification-tweet';
@@ -2975,7 +2976,7 @@ function StockDetailSheet({
       {embeddedStock ? (
         <View style={styles.embeddedSheetSurface}>{sheetContents}</View>
       ) : (
-        <BottomSheetModal
+        <SheetModal
           ref={sheetRef}
           name="stock-detail-sheet"
           index={0}
@@ -3028,7 +3029,7 @@ function StockDetailSheet({
           }}
         >
           {sheetContents}
-        </BottomSheetModal>
+        </SheetModal>
       )}
       <DepositSheet
         ref={depositSheetRef}

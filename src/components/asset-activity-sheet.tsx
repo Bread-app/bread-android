@@ -1,4 +1,5 @@
 import { BottomSheetBackdrop, BottomSheetModal, BottomSheetScrollView } from '@gorhom/bottom-sheet';
+import { SheetModal } from '@/components/sheet-modal';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import React, {
   useCallback,
@@ -116,7 +117,7 @@ export const AssetActivitySheet = React.forwardRef<
   const title = name?.trim() || symbol;
 
   return (
-    <BottomSheetModal
+    <SheetModal
       ref={sheetRef}
       snapPoints={snapPoints}
       enableDynamicSizing={false}
@@ -182,7 +183,7 @@ export const AssetActivitySheet = React.forwardRef<
           </View>
         )}
       </BottomSheetScrollView>
-    </BottomSheetModal>
+    </SheetModal>
   );
 });
 

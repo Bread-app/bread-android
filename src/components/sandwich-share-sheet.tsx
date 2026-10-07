@@ -3,6 +3,7 @@ import {
   BottomSheetModal,
   BottomSheetScrollView,
 } from "@gorhom/bottom-sheet";
+import { SheetModal } from "@/components/sheet-modal";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import * as Clipboard from "expo-clipboard";
 import * as Haptics from "expo-haptics";
@@ -358,7 +359,7 @@ export const SandwichShareSheet = forwardRef<SandwichShareSheetRef, unknown>(
       : `${creatorDisplayName}'s sandwich`;
 
     return (
-      <BottomSheetModal
+      <SheetModal
         ref={sheetRef}
         snapPoints={snapPoints}
         enableDynamicSizing={false}
@@ -465,7 +466,7 @@ export const SandwichShareSheet = forwardRef<SandwichShareSheetRef, unknown>(
             </>
           ) : null}
         </BottomSheetScrollView>
-      </BottomSheetModal>
+      </SheetModal>
     );
   },
 );

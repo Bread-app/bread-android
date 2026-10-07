@@ -3,6 +3,7 @@ import {
   BottomSheetModal,
   BottomSheetScrollView,
 } from '@gorhom/bottom-sheet';
+import { SheetModal } from '@/components/sheet-modal';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import * as Clipboard from 'expo-clipboard';
 import * as Haptics from 'expo-haptics';
@@ -394,7 +395,7 @@ export const AssetShareSheet = forwardRef<AssetShareSheetRef, unknown>(
     }, [asset, shareMessage]);
 
     return (
-      <BottomSheetModal
+      <SheetModal
         ref={sheetRef}
         enableDynamicSizing
         maxDynamicContentSize={maxSheetHeight}
@@ -522,7 +523,7 @@ export const AssetShareSheet = forwardRef<AssetShareSheetRef, unknown>(
             </>
           ) : null}
         </BottomSheetScrollView>
-      </BottomSheetModal>
+      </SheetModal>
     );
   },
 );

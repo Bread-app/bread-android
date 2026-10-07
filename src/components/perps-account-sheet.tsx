@@ -1,4 +1,5 @@
 import { BottomSheetBackdrop, BottomSheetModal, BottomSheetView } from '@gorhom/bottom-sheet';
+import { SheetModal } from '@/components/sheet-modal';
 import React, {
   useCallback,
   useEffect,
@@ -311,7 +312,7 @@ export const PerpsAccountSheet = React.forwardRef<
     moveAmount <= available + 1e-6;
 
   return (
-    <BottomSheetModal
+    <SheetModal
       ref={sheetRef}
       snapPoints={snapPoints}
       enableDynamicSizing={false}
@@ -397,7 +398,7 @@ export const PerpsAccountSheet = React.forwardRef<
           </>
         )}
       </BottomSheetView>
-    </BottomSheetModal>
+    </SheetModal>
   );
 });
 

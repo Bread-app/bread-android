@@ -1,4 +1,5 @@
 import { BottomSheetBackdrop, BottomSheetModal, BottomSheetScrollView } from '@gorhom/bottom-sheet';
+import { SheetModal } from '@/components/sheet-modal';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import * as Clipboard from 'expo-clipboard';
 import * as Haptics from 'expo-haptics';
@@ -165,7 +166,7 @@ export const PositionShareSheet = forwardRef<PositionShareSheetRef, unknown>(
     }, [capture, detail, shareMessage]);
 
     return (
-      <BottomSheetModal
+      <SheetModal
         ref={sheetRef}
         snapPoints={['100%']}
         enableDynamicSizing={false}
@@ -227,7 +228,7 @@ export const PositionShareSheet = forwardRef<PositionShareSheetRef, unknown>(
             </>
           ) : null}
         </BottomSheetScrollView>
-      </BottomSheetModal>
+      </SheetModal>
     );
   },
 );

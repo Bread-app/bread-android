@@ -1,4 +1,5 @@
 import { BottomSheetBackdrop, BottomSheetModal, BottomSheetScrollView } from '@gorhom/bottom-sheet';
+import { SheetModal } from '@/components/sheet-modal';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
@@ -187,7 +188,7 @@ function PositionDetailSheet({
     : money(closed ? detail?.proceedsUsd : shown?.currentValueUsd);
 
   return (
-    <BottomSheetModal
+    <SheetModal
       ref={sheetRef}
       snapPoints={['88%']}
       enableDynamicSizing={false}
@@ -341,7 +342,7 @@ function PositionDetailSheet({
           </>
         ) : null}
       </BottomSheetScrollView>
-    </BottomSheetModal>
+    </SheetModal>
   );
 });
 

@@ -3,6 +3,7 @@ import {
   BottomSheetModal,
   BottomSheetView,
 } from '@gorhom/bottom-sheet';
+import { SheetModal } from '@/components/sheet-modal';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import * as Clipboard from 'expo-clipboard';
 import * as Haptics from 'expo-haptics';
@@ -297,7 +298,7 @@ export const TradeShareSheet = forwardRef<
     }, [trade, isSandwich, shareMessage]);
 
     return (
-      <BottomSheetModal
+      <SheetModal
         ref={sheetRef}
         enableDynamicSizing
         maxDynamicContentSize={maxSheetHeight}
@@ -466,7 +467,7 @@ export const TradeShareSheet = forwardRef<
             </>
           ) : null}
         </BottomSheetView>
-      </BottomSheetModal>
+      </SheetModal>
     );
   },
 );

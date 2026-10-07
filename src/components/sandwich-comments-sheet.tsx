@@ -6,6 +6,7 @@ import {
   BottomSheetTextInput,
   BottomSheetView,
 } from '@gorhom/bottom-sheet';
+import { SheetModal } from '@/components/sheet-modal';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import * as Haptics from 'expo-haptics';
 import React, {
@@ -367,7 +368,7 @@ export const SandwichCommentsSheet = forwardRef<SandwichCommentsSheetRef, Props>
     );
 
     return (
-      <BottomSheetModal
+      <SheetModal
         ref={sheetRef}
         index={0}
         snapPoints={snapPoints}
@@ -458,7 +459,7 @@ export const SandwichCommentsSheet = forwardRef<SandwichCommentsSheetRef, Props>
           )}
 
         </BottomSheetView>
-      </BottomSheetModal>
+      </SheetModal>
     );
   },
 );

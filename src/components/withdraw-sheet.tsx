@@ -5,6 +5,7 @@ import {
   BottomSheetTextInput,
   BottomSheetView,
 } from '@gorhom/bottom-sheet';
+import { SheetModal } from '@/components/sheet-modal';
 import { useEmbeddedSolanaWallet } from '@privy-io/expo';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import * as Clipboard from 'expo-clipboard';
@@ -402,7 +403,7 @@ export const WithdrawSheet = forwardRef<WithdrawSheetRef, object>(function Withd
   }
 
   return (
-    <BottomSheetModal
+    <SheetModal
       ref={sheetRef}
       snapPoints={snapPoints}
       enableDynamicSizing={false}
@@ -667,7 +668,7 @@ export const WithdrawSheet = forwardRef<WithdrawSheetRef, object>(function Withd
           </Animated.View>
         )}
       </BottomSheetView>
-    </BottomSheetModal>
+    </SheetModal>
   );
 });
 

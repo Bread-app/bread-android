@@ -5,6 +5,7 @@ import {
   BottomSheetView,
   type BottomSheetBackgroundProps,
 } from '@gorhom/bottom-sheet';
+import { SheetModal } from '@/components/sheet-modal';
 
 import { BlurBackdrop } from '@/components/blur-backdrop';
 import { GlassSheetSurface } from '@/components/glass-sheet-surface';
@@ -976,7 +977,7 @@ export const TradeAmountSheet = forwardRef<TradeAmountSheetRef, TradeAmountSheet
   );
 
   return (
-    <BottomSheetModal
+    <SheetModal
       ref={sheetRef}
       snapPoints={snapPoints}
       enableDynamicSizing={false}
@@ -1026,7 +1027,7 @@ export const TradeAmountSheet = forwardRef<TradeAmountSheetRef, TradeAmountSheet
           thesisText={thesisText}
         />
       </BottomSheetView>
-    </BottomSheetModal>
+    </SheetModal>
   );
 });
 

@@ -1,5 +1,6 @@
 import { NotificationTweet } from '@/components/notification-tweet';
 import { BottomSheetBackdrop, BottomSheetModal, BottomSheetScrollView } from '@gorhom/bottom-sheet';
+import { SheetModal } from '@/components/sheet-modal';
 import { useEmbeddedEthereumWallet, useEmbeddedSolanaWallet } from '@privy-io/expo';
 import React, {
   forwardRef,
@@ -1732,7 +1733,7 @@ const PhoenixMarketDetailSheetContent = forwardRef<
     if (embeddedMarket) return sheetContents;
 
     return (
-      <BottomSheetModal
+      <SheetModal
         ref={sheetRef}
         snapPoints={snapPoints}
         // The body is a flex:1 View (scroll area + pinned action bar), so the
@@ -1759,7 +1760,7 @@ const PhoenixMarketDetailSheetContent = forwardRef<
         }}
       >
         {sheetContents}
-      </BottomSheetModal>
+      </SheetModal>
     );
 });
 
