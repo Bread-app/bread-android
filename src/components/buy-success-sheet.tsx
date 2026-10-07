@@ -1,10 +1,11 @@
 import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
-import React, { useEffect, useMemo, useRef } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Image,
   Linking,
   Modal,
+  Platform,
   Pressable,
   Share,
   StatusBar,
@@ -20,6 +21,7 @@ import { isXPostSource, sourcePostText } from '@/components/x-post-preview';
 import { sourceYouTubeVideoId, type SandwichSource } from '@/lib/api';
 import { GlassView, isGlassEffectAPIAvailable } from 'expo-glass-effect';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { FullWindowOverlay } from 'react-native-screens';
 import * as Haptics from 'expo-haptics';
 import * as Clipboard from 'expo-clipboard';
 import Ionicons from '@expo/vector-icons/Ionicons';
@@ -29,6 +31,7 @@ import RNShare, { Social } from 'react-native-share';
 import { captureRef } from 'react-native-view-shot';
 import Svg, { Path, Circle } from 'react-native-svg';
 import Animated, {
+  runOnJS,
   useAnimatedStyle,
   useSharedValue,
   withDelay,
@@ -1525,13 +1528,8 @@ export function BuySuccessSheet({
       />
     ) : null;
 
-  return (
-    <Modal
-      visible={visible}
-      animationType="fade"
-      transparent={false}
-      statusBarTranslucent
-      onRequestClose={onClose}>
+  const receipt = (
+    <>
       <StatusBar barStyle="dark-content" />
       <BottomSheetModalProvider>
       <View style={styles.container}>
@@ -1787,7 +1785,72 @@ export function BuySuccessSheet({
         {children}
       </View>
       </BottomSheetModalProvider>
+    </>
+  );
+
+  if (Platform.OS === 'ios') {
+    return <ReceiptOverlay visible={visible}>{receipt}</ReceiptOverlay>;
+  }
+  return (
+    <Modal
+      visible={visible}
+      animationType="fade"
+      transparent={false}
+      statusBarTranslucent
+      onRequestClose={onClose}>
+      {receipt}
     </Modal>
+  );
+}
+
+/**
+ * iOS presentation for the receipt: a window-level overlay, not a `<Modal>`.
+ *
+ * An RN Modal presents from the view controller its host sits in. The app-root
+ * receipt host (lib/trade-fx) sits under the Stack, so whenever a native sheet
+ * is up — the perp position form sheet, the podcast-call close drawer — or is
+ * still animating away, UIKit refuses the presentation ("already presenting")
+ * and the receipt silently never appears. That is how every close lost its
+ * success screen. `FullWindowOverlay` draws on the key window above every
+ * presented controller, the same way the toasts do, so a receipt can open from
+ * anywhere and at any moment — including over the sheet that started it.
+ *
+ * Fades like the Modal did, in both directions: it stays mounted through the
+ * fade-out and only then leaves the window.
+ */
+function ReceiptOverlay({
+  visible,
+  children,
+}: {
+  visible: boolean;
+  children: React.ReactNode;
+}) {
+  const [mounted, setMounted] = useState(visible);
+  const opacity = useSharedValue(0);
+
+  useEffect(() => {
+    if (visible) {
+      setMounted(true);
+      opacity.value = withTiming(1, { duration: 220 });
+      return;
+    }
+    opacity.value = withTiming(0, { duration: 180 }, (finished) => {
+      if (finished) runOnJS(setMounted)(false);
+    });
+  }, [opacity, visible]);
+
+  const style = useAnimatedStyle(() => ({ opacity: opacity.value }));
+
+  if (!mounted) return null;
+  return (
+    <FullWindowOverlay unstable_accessibilityContainerViewIsModal>
+      <Animated.View
+        style={[StyleSheet.absoluteFill, style]}
+        // Never swallow a tap meant for the screen underneath while fading out.
+        pointerEvents={visible ? 'auto' : 'none'}>
+        {children}
+      </Animated.View>
+    </FullWindowOverlay>
   );
 }
 

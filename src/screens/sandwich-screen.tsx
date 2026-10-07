@@ -101,7 +101,12 @@ import { useSavedStore } from "@/lib/saved-store";
 import { useThemeStore } from "@/lib/theme-store";
 import { userDisplayName } from "@/lib/user-display";
 import { useThemedStyles } from "@/hooks/use-themed-styles";
-import { useTradeFx, type SandwichFxEvent } from "@/lib/trade-fx";
+import {
+  dismissSandwichFx,
+  updateSandwichFx,
+  useTradeFx,
+  type SandwichFxEvent,
+} from "@/lib/trade-fx";
 import { type PodcastGroupVideo } from "@/components/podcast-sandwich-group-card";
 import { CookingOverlay, NotifyHandoffOverlay } from "@/components/cooking-overlay";
 import { startPodcastSpec } from "@/lib/podcast-job";
@@ -4299,7 +4304,9 @@ export function SandwichSellPad({
   thesisContent?: React.ReactNode;
   onClose: () => void;
   onToast: (toast: ToastState, duration?: number) => void;
-  onCelebrate?: (event: SandwichFxEvent) => void;
+  /** Opens the exit receipt (`tradeFx.playSandwich`); returns its id so the
+   *  "selling…" state can be flipped to the result or taken down. */
+  onCelebrate?: (event: SandwichFxEvent) => number;
   onPositionUpdated: (position: SandwichPosition | null) => void;
 }) {
   const solanaWallet = useEmbeddedSolanaWallet();
@@ -4374,6 +4381,22 @@ export function SandwichSellPad({
     const sellFraction = hasPredictionLeg
       ? 1
       : Math.max(0, Math.min(1, numericAmount / positionValue));
+    // The exit receipt for a given executed share. It opens at once in its
+    // "selling…" state — the same progress surface a stock sell uses — so the
+    // wait happens on the screen that reports the result, not behind the pad.
+    const sellReceipt = (executedFraction: number): SandwichFxEvent => ({
+      action: "sell",
+      icons: position.legs.map((leg) => leg.imageUrl),
+      label: position.name,
+      percent: Math.round(executedFraction * 100),
+      amountUsd: positionValue * executedFraction,
+      pnlUsd: positionValuation.pnlUsd * executedFraction,
+      sincePnlPct: sandwich?.pnlPct ?? null,
+      source: sandwich?.source ?? null,
+      // Same receipt as the buy: a sell closes the same moment, so it quotes
+      // the same line.
+      caption: momentReceiptLine(sandwich ?? null),
+    });
     // Spot legs share the server's packed exit path with the profile screen:
     // quote all legs in parallel, sign the compact transaction set, then submit
     // once. The former loop below is kept only for legacy prediction positions.
@@ -4381,6 +4404,10 @@ export function SandwichSellPad({
       Keyboard.dismiss();
       setSubmitting(true);
       setMessage(null);
+      const receiptId = onCelebrate?.({ ...sellReceipt(sellFraction), loading: true }) ?? null;
+      // Once the sell has landed the receipt is the result; a later bookkeeping
+      // error must not take it away.
+      let receiptSettled = false;
       try {
         const fractionBps = sellFraction >= 0.995
           ? 10_000
@@ -4408,22 +4435,22 @@ export function SandwichSellPad({
           : 1;
         const executedFraction = sellFraction * filledShare;
         if (executedFraction <= 0) throw new Error("No sandwich layers were sold.");
-        await recordSandwichPositionSell(wallet.address, position.id, executedFraction);
-        onPositionUpdated(scaleSandwichPosition(position, executedFraction));
-        await Promise.all([walletStore.refresh(), walletStore.reloadCostBasis()]);
-        onCelebrate?.({
-          action: "sell",
-          icons: position.legs.map((leg) => leg.imageUrl),
-          label: position.name,
-          percent: Math.round(executedFraction * 100),
-          amountUsd: positionValue * executedFraction,
-          pnlUsd: positionValuation.pnlUsd * executedFraction,
-          sincePnlPct: sandwich?.pnlPct ?? null,
-          source: sandwich?.source ?? null,
-          caption: momentReceiptLine(sandwich ?? null),
-        });
+        // The sell landed: flip the receipt now. Ledger and balance refreshes
+        // are bookkeeping and never stand between a fill and its success screen.
+        if (receiptId !== null) updateSandwichFx(receiptId, sellReceipt(executedFraction));
+        receiptSettled = true;
         onClose();
+        // Local ledger only — the sell already landed, so a write error here
+        // must not read as "Sell stopped".
+        await recordSandwichPositionSell(wallet.address, position.id, executedFraction).catch(
+          () => undefined,
+        );
+        onPositionUpdated(scaleSandwichPosition(position, executedFraction));
+        void Promise.all([walletStore.refresh(), walletStore.reloadCostBasis()]).catch(
+          () => undefined,
+        );
       } catch (error) {
+        if (receiptId !== null && !receiptSettled) dismissSandwichFx(receiptId);
         const nextMessage = humanizeErrorMessage(error, "Sell failed. Your unsold assets are still in your wallet.");
         setMessage(nextMessage);
         onToast({ text: "Sell stopped", tone: "error" });
@@ -4456,9 +4483,11 @@ export function SandwichSellPad({
       return;
     }
     Keyboard.dismiss();
-    // Exits run silent — the button spins, and the sell burst is the receipt.
+    // Exits run silent — the receipt opens in its "selling…" state at once.
     setSubmitting(true);
     setMessage(null);
+    const receiptId = onCelebrate?.({ ...sellReceipt(sellFraction), loading: true }) ?? null;
+    let receiptSettled = false;
     let closedPrediction = false;
     try {
       const provider = await wallet.getProvider();
@@ -4547,33 +4576,21 @@ export function SandwichSellPad({
           });
         }
       }
-      await recordSandwichPositionSell(wallet.address, position.id, sellFraction);
-      const nextPosition = scaleSandwichPosition(position, sellFraction);
-      onPositionUpdated(nextPosition);
-      await Promise.all([
-        walletStore.refresh(),
-        walletStore.reloadCostBasis(),
-      ]);
+      // Every leg is out: the receipt flips to the result, and the ledger and
+      // balance refreshes run behind it.
+      if (receiptId !== null) updateSandwichFx(receiptId, sellReceipt(sellFraction));
+      receiptSettled = true;
       setMessage(null);
-      // The sell burst peels the stack apart and shows what the sold slice
-      // made. `investedUsd` is the cost basis this position carries; without it
-      // (legacy rows never recorded one) the burst plays with no figure rather
-      // than a made-up zero.
-      onCelebrate?.({
-        action: "sell",
-        icons: position.legs.map((leg) => leg.imageUrl),
-        label: position.name,
-        percent: Math.round(sellFraction * 100),
-        amountUsd: positionValue * sellFraction,
-        pnlUsd: positionValuation.pnlUsd * sellFraction,
-        sincePnlPct: sandwich?.pnlPct ?? null,
-        source: sandwich?.source ?? null,
-        // Same receipt as the buy: a sell closes the same moment, so it quotes
-        // the same line.
-        caption: momentReceiptLine(sandwich ?? null),
-      });
       onClose();
+      await recordSandwichPositionSell(wallet.address, position.id, sellFraction).catch(
+        () => undefined,
+      );
+      onPositionUpdated(scaleSandwichPosition(position, sellFraction));
+      void Promise.all([walletStore.refresh(), walletStore.reloadCostBasis()]).catch(
+        () => undefined,
+      );
     } catch (error) {
+      if (receiptId !== null && !receiptSettled) dismissSandwichFx(receiptId);
       const nextMessage = humanizeErrorMessage(
         error,
         "Sell failed. Your unsold assets are still in your wallet.",

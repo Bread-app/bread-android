@@ -1356,10 +1356,40 @@ export function ProfileScreen() {
     ) => {
       if (!wallet || closingPhoenixSymbol) return;
       const symbol = position.symbol.trim().toUpperCase();
-      // Exits run silent. `closingPhoenixSymbol` already disables the pad and
-      // spins its button, and the exit receipt below reports the result — a
-      // toast in between would only narrate what the screen is showing.
+      // Exits run silent: the receipt opens straight away in its "closing…"
+      // state — the same progress surface an open uses — and becomes the exit
+      // screen once the order lands, or goes away on failure.
       setClosingPhoenixSymbol(symbol);
+      // The exit receipt leads with the PnL this exit realizes — the whole
+      // carry on a full close, its share on a partial one — over the entry it
+      // is being measured against. Every figure comes from the position as it
+      // was, so the receipt never has to wait on Phoenix.
+      const logo = perpLogoSources(position);
+      // The mark the sheet was showing, or — when the close came from
+      // somewhere without one — the price implied by the PnL this position is
+      // carrying, which is the same number the position card printed.
+      const size = Math.abs(position.positionSize);
+      const impliedExit =
+        size > 0 && Number.isFinite(position.unrealizedPnl)
+          ? position.entryPrice +
+            (position.unrealizedPnl / size) * (position.positionSize < 0 ? -1 : 1)
+          : null;
+      const receipt = {
+        action: "close" as const,
+        side: position.positionSize < 0 ? ("short" as const) : ("long" as const),
+        symbol,
+        // Phoenix's own mark is an SVG, which the receipt's hero cannot draw;
+        // the asset's tokens.xyz art comes first.
+        logoUri: logo.uri,
+        logoFallbackUris: logo.fallbackUris,
+        leverage: position.leverage ?? null,
+        entryPrice: position.entryPrice,
+        exitPrice: exitPrice ?? impliedExit,
+        // Only the share of collateral this close actually frees.
+        marginUsd: position.marginUsd != null ? position.marginUsd * fraction : null,
+        pnlUsd: position.unrealizedPnl * fraction,
+      };
+      const receiptId = tradeFx.playPerp({ ...receipt, loading: true });
       try {
         // The share travels, not a size — the position is measured server-side
         // at build time, so a stale number here can never enlarge the order.
@@ -1383,45 +1413,17 @@ export function ProfileScreen() {
         if (built.closeRecordId) {
           void confirmPhoenixClose(built.closeRecordId, sent.signature);
         }
-        // Re-read in the background: the receipt below is built from the
-        // position as it was, so it never needed to wait on Phoenix.
+        tradeFx.updatePerp(receiptId, { ...receipt, loading: false });
+        // Re-read in the background: the receipt is built from the position as
+        // it was, so it never needed to wait on Phoenix.
         void getPhoenixAccount()
           .then((nextAccount) => {
             setPhoenixAccount(nextAccount);
             setPortfolioRefreshKey((value) => value + 1);
           })
           .catch(() => undefined);
-        // The exit receipt leads with the PnL this exit realizes — the whole
-        // carry on a full close, its share on a partial one — over the entry
-        // it is being measured against.
-        const logo = perpLogoSources(position);
-        // The mark the sheet was showing, or — when the close came from
-        // somewhere without one — the price implied by the PnL this position
-        // is carrying, which is the same number the position card printed.
-        const size = Math.abs(position.positionSize);
-        const impliedExit =
-          size > 0 && Number.isFinite(position.unrealizedPnl)
-            ? position.entryPrice +
-              (position.unrealizedPnl / size) * (position.positionSize < 0 ? -1 : 1)
-            : null;
-        tradeFx.playPerp({
-          action: "close",
-          side: position.positionSize < 0 ? "short" : "long",
-          symbol,
-          // Phoenix's own mark is an SVG, which the receipt's hero cannot draw;
-          // the asset's tokens.xyz art comes first and that is what fixed the
-          // icon-less exit screen.
-          logoUri: logo.uri,
-          logoFallbackUris: logo.fallbackUris,
-          leverage: position.leverage ?? null,
-          entryPrice: position.entryPrice,
-          exitPrice: exitPrice ?? impliedExit,
-          // Only the share of collateral this close actually frees.
-          marginUsd:
-            position.marginUsd != null ? position.marginUsd * fraction : null,
-          pnlUsd: position.unrealizedPnl * fraction,
-        });
       } catch (cause) {
+        tradeFx.dismissPerp(receiptId);
         showToast({
           text: cause instanceof Error ? cause.message : `Could not close ${symbol}`,
           tone: "error",
@@ -2414,6 +2416,20 @@ export function ProfileScreen() {
     }
     const sellFraction = fractionBps / 10_000;
 
+    // The exit receipt for a given executed share. Opened at once in its
+    // "selling…" state — the same progress surface a stock sell uses — and
+    // flipped to the result when the sell lands, or taken away if it fails.
+    const sellReceipt = (executedFraction: number) => ({
+      action: "sell" as const,
+      icons: position.legs.map((leg) => leg.imageUrl),
+      label: position.name,
+      percent: Math.round(executedFraction * 100),
+      amountUsd: rowValue == null ? null : rowValue * executedFraction,
+      pnlUsd: sandwichRealizedPnl(position, executedFraction, rowValue),
+      sincePnlPct: sandwichSincePnlPctFor(position.sandwichId),
+      source: sandwichSourceFor(position.sandwichId),
+    });
+
     // ── Packed exit: one request, one signature, one submit ────────────────
     //
     // The server quotes every leg concurrently and packs them into as few
@@ -2431,6 +2447,10 @@ export function ProfileScreen() {
       // Same as the buy: silent unless something goes wrong, or lands short.
       setSandwichTrading(true);
       setSandwichMessage(null);
+      const receiptId = tradeFx.playSandwich({ ...sellReceipt(sellFraction), loading: true });
+      // Once the sell has landed the receipt is the result; a later bookkeeping
+      // error must not take it away.
+      let receiptSettled = false;
       try {
         // Reuse the build touch-down started, when it was for this exact exit.
         // Consumed either way: a build is single-use, and re-awaiting a settled
@@ -2457,15 +2477,9 @@ export function ProfileScreen() {
         }
 
         // /submit holds the request open until the bundle confirms on-chain —
-        // seconds, sometimes tens of them. Say so; the wallet sheet has closed
-        // and otherwise nothing moves until the receipt.
-        showToast({ text: "Selling…", tone: "processing" }, 0);
-        let result: Awaited<ReturnType<typeof submitSignedBasketBuy>>;
-        try {
-          result = await submitSignedBasketBuy(started.basketRunId, signed);
-        } finally {
-          setToast(null);
-        }
+        // seconds, sometimes tens of them. The receipt is already up saying
+        // "selling…", so nothing else needs to narrate the wait.
+        const result = await submitSignedBasketBuy(started.basketRunId, signed);
         if (result.status === "failed") {
           throw new Error(result.reason || "The sell did not land. Please try again.");
         }
@@ -2481,19 +2495,11 @@ export function ProfileScreen() {
         const executedFraction = sellFraction * soldShare;
         const percent = Math.round(executedFraction * 100);
 
-        // The receipt goes up the moment the sell is confirmed — before the
+        // The receipt flips the moment the sell is confirmed — before the
         // storage writes, the position re-render and the sheet dismissal below,
         // each of which used to sit between the confirmation and the celebration.
-        tradeFx.playSandwich({
-          action: "sell",
-          icons: position.legs.map((leg) => leg.imageUrl),
-          label: position.name,
-          percent,
-          amountUsd: rowValue == null ? null : rowValue * executedFraction,
-          pnlUsd: sandwichRealizedPnl(position, executedFraction, rowValue),
-          sincePnlPct: sandwichSincePnlPctFor(position.sandwichId),
-          source: sandwichSourceFor(position.sandwichId),
-        });
+        tradeFx.updateSandwich(receiptId, { ...sellReceipt(executedFraction), percent });
+        receiptSettled = true;
 
         if (executedFraction >= 0.9999) {
           deliberatelyClosedSandwichIds.current.add(position.sandwichId);
@@ -2524,6 +2530,7 @@ export function ProfileScreen() {
         }
         void walletStore.refresh();
       } catch (error) {
+        if (!receiptSettled) tradeFx.dismissSandwich(receiptId);
         // Nothing left to sell: this position was exited some other way and the
         // server has just closed the record. The user asked to be out and they
         // are, so this is a completed exit, not a failure to retry.
@@ -2591,6 +2598,10 @@ export function ProfileScreen() {
 
     setSandwichTrading(true);
     setSandwichMessage(null);
+    const receiptId = tradeFx.playSandwich({ ...sellReceipt(sellFraction), loading: true });
+    // Every early exit below (a stopped leg returns from inside the try) takes
+    // the progress receipt down in `finally`; only a landed sell keeps it.
+    let receiptSettled = false;
 
     // A closed prediction position pays out in JupUSD, not USDC — track it so we
     // can convert the proceeds back to USDC and park them in the vault afterward.
@@ -2739,21 +2750,14 @@ export function ProfileScreen() {
       }
       setSandwichMessage(null);
       setPortfolioRefreshKey((value) => value + 1);
-      tradeFx.playSandwich({
-        action: "sell",
-        icons: position.legs.map((leg) => leg.imageUrl),
-        label: position.name,
-        percent: Math.round(sellFraction * 100),
-        amountUsd: rowValue == null ? null : rowValue * sellFraction,
-        pnlUsd: sandwichRealizedPnl(position, sellFraction, rowValue),
-        sincePnlPct: sandwichSincePnlPctFor(position.sandwichId),
-        source: sandwichSourceFor(position.sandwichId),
-      });
+      tradeFx.updateSandwich(receiptId, sellReceipt(sellFraction));
+      receiptSettled = true;
     } catch (error) {
       const message = getErrorMessage(error);
       setSandwichMessage(message);
       showToast({ text: message, tone: "error" });
     } finally {
+      if (!receiptSettled) tradeFx.dismissSandwich(receiptId);
       setSandwichTrading(false);
     }
   }
@@ -2824,6 +2828,32 @@ export function ProfileScreen() {
     if (!closing) {
       showToast({ text: "Preparing collateral move…", tone: "processing" }, 0);
     }
+    // A perp Sandwich exits as a perp, so it gets the perps exit receipt —
+    // opened at once in its "closing…" state, like a standalone close.
+    const closedLeg = position.legs[0];
+    const closeReceipt = closing
+      ? (() => {
+          // Same treatment as a standalone close: the leg's own asset art, so
+          // the exit receipt has a face on it instead of a letter tile.
+          const legLogo = closedLeg
+            ? perpLogoSources({ symbol: closedLeg.symbol })
+            : { uri: null, fallbackUris: [] as (string | null)[] };
+          return {
+            action: "close" as const,
+            side: closedLeg?.side === "short" ? ("short" as const) : ("long" as const),
+            symbol: (closedLeg?.symbol ?? position.sandwich.name).toUpperCase(),
+            name: position.sandwich.name,
+            logoUri: legLogo.uri,
+            logoFallbackUris: legLogo.fallbackUris,
+            leverage: position.leverage ?? null,
+            entryPrice: closedLeg?.entryPrice ?? null,
+            exitPrice: closedLeg?.markPrice ?? null,
+            marginUsd: closedLeg?.marginUsdc ?? position.marginUsdc ?? null,
+            pnlUsd: closedLeg?.pnlAfterFundingUsd ?? closedLeg?.unrealizedPnlUsd ?? null,
+          };
+        })()
+      : null;
+    const receiptId = closeReceipt ? tradeFx.playPerp({ ...closeReceipt, loading: true }) : null;
     try {
       const started = closing
         ? await startPerpSandwichClose(position.id)
@@ -2860,41 +2890,25 @@ export function ProfileScreen() {
       // that window would show the money as still gone. Force it.
       if (!closing) void walletStore.refresh();
 
-      if (closing && options?.returnToCash) {
-        await returnCollateralToCash();
-      }
       if (!closing) {
         showToast({ text: "Collateral move started", tone: "success" });
       }
-      // A perp Sandwich exits as a perp, so it gets the perps close burst (the
-      // collateral move is bookkeeping and stays a plain toast).
-      if (closing) {
-        const closedLeg = position.legs[0];
-        const legSymbol = (closedLeg?.symbol ?? position.sandwich.name).toUpperCase();
-        // Same treatment as a standalone close: the leg's own asset art, so the
-        // exit receipt has a face on it instead of a letter tile.
-        const legLogo = closedLeg
-          ? perpLogoSources({ symbol: closedLeg.symbol })
-          : { uri: null, fallbackUris: [] as (string | null)[] };
-        const legPnl = closedLeg?.pnlAfterFundingUsd ?? closedLeg?.unrealizedPnlUsd ?? null;
-        tradeFx.playPerp({
-          action: "close",
-          side: closedLeg?.side === "short" ? "short" : "long",
-          symbol: legSymbol,
-          name: position.sandwich.name,
-          logoUri: legLogo.uri,
-          logoFallbackUris: legLogo.fallbackUris,
-          leverage: position.leverage ?? null,
-          entryPrice: closedLeg?.entryPrice ?? null,
-          exitPrice: closedLeg?.markPrice ?? null,
-          marginUsd: closedLeg?.marginUsdc ?? position.marginUsdc ?? null,
-          pnlUsd: legPnl,
-        });
+      if (closeReceipt && receiptId !== null) {
+        // The exit has landed: the receipt flips now. Moving the collateral
+        // back to cash is a second transaction behind it and never holds up the
+        // success screen.
+        tradeFx.updatePerp(receiptId, { ...closeReceipt, loading: false });
         void settlePromise?.finally(() => loadClosedPositions());
+        if (options?.returnToCash) {
+          void returnCollateralToCash().finally(() => {
+            void loadPhoenixData();
+          });
+        }
       }
       void loadPerpSandwichData();
       void loadPhoenixData();
     } catch (error) {
+      if (receiptId !== null) tradeFx.dismissPerp(receiptId);
       showToast({ text: getErrorMessage(error), tone: "error" });
     } finally {
       setPerpSandwichActionId(null);

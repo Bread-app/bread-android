@@ -84,6 +84,8 @@ export type PerpFxEvent = {
 
 export type SandwichFxEvent = {
   action: 'buy' | 'sell';
+  /** Shows the receipt as progress ("selling…") without firing its success animation. */
+  loading?: boolean;
   /** One entry per leg, in stack order; drives both the slabs and the confetti. */
   icons: (string | null | undefined)[];
   label?: string | null;
@@ -116,15 +118,18 @@ function openThesisComposer(target: TakeComposerTarget) {
 }
 
 type TradeFx =
-  | ({ id: number; kind: 'perp' } & PerpFxEvent)
-  | ({ id: number; kind: 'sandwich' } & SandwichFxEvent);
+  | ({ id: number; kind: 'perp'; open: boolean } & PerpFxEvent)
+  | ({ id: number; kind: 'sandwich'; open: boolean } & SandwichFxEvent);
 
 type TradeFxContextValue = {
   /** Opens a perp receipt and returns the id used to update or dismiss it. */
   playPerp: (event: PerpFxEvent) => number;
   updatePerp: (id: number, event: PerpFxEvent) => void;
   dismissPerp: (id: number) => void;
-  playSandwich: (event: SandwichFxEvent) => void;
+  /** Opens a Sandwich receipt and returns the id used to update or dismiss it. */
+  playSandwich: (event: SandwichFxEvent) => number;
+  updateSandwich: (id: number, event: SandwichFxEvent) => void;
+  dismissSandwich: (id: number) => void;
 };
 
 let fxIdSeq = 1;
@@ -140,7 +145,10 @@ let fxIdSeq = 1;
  * [[bottom-sheet-context-loss]]. A module-level emitter has no such tree to be
  * torn out of, so a call site can be anywhere.
  */
-type TradeFxSignal = TradeFx | { kind: 'dismiss-perp'; id: number };
+type TradeFxSignal =
+  | TradeFx
+  | { kind: 'dismiss-perp'; id: number }
+  | { kind: 'dismiss-sandwich'; id: number };
 type Emitter = (fx: TradeFxSignal) => void;
 
 let emitFx: Emitter | null = null;
@@ -154,20 +162,30 @@ function dispatchFx(fx: TradeFxSignal) {
 
 export function playPerpFx(event: PerpFxEvent): number {
   const id = fxIdSeq++;
-  dispatchFx({ id, kind: 'perp', ...event });
+  dispatchFx({ id, kind: 'perp', open: true, ...event });
   return id;
 }
 
 export function updatePerpFx(id: number, event: PerpFxEvent) {
-  dispatchFx({ id, kind: 'perp', ...event });
+  dispatchFx({ id, kind: 'perp', open: true, ...event });
 }
 
 export function dismissPerpFx(id: number) {
   dispatchFx({ id, kind: 'dismiss-perp' });
 }
 
-export function playSandwichFx(event: SandwichFxEvent) {
-  dispatchFx({ id: fxIdSeq++, kind: 'sandwich', ...event });
+export function playSandwichFx(event: SandwichFxEvent): number {
+  const id = fxIdSeq++;
+  dispatchFx({ id, kind: 'sandwich', open: true, ...event });
+  return id;
+}
+
+export function updateSandwichFx(id: number, event: SandwichFxEvent) {
+  dispatchFx({ id, kind: 'sandwich', open: true, ...event });
+}
+
+export function dismissSandwichFx(id: number) {
+  dispatchFx({ id, kind: 'dismiss-sandwich' });
 }
 
 const TRADE_FX: TradeFxContextValue = {
@@ -175,6 +193,8 @@ const TRADE_FX: TradeFxContextValue = {
   updatePerp: updatePerpFx,
   dismissPerp: dismissPerpFx,
   playSandwich: playSandwichFx,
+  updateSandwich: updateSandwichFx,
+  dismissSandwich: dismissSandwichFx,
 };
 
 /**
@@ -197,8 +217,16 @@ export function TradeFxProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     const emit: Emitter = (next) => {
+      // A dismissal keeps the receipt's props and only flips `open`, so it can
+      // fade out with the numbers it was showing instead of blanking first.
       if (next.kind === 'dismiss-perp') {
-        setPerpFx((current) => (current?.id === next.id ? null : current));
+        setPerpFx((current) => (current?.id === next.id ? { ...current, open: false } : current));
+        return;
+      }
+      if (next.kind === 'dismiss-sandwich') {
+        setSandwichFx((current) =>
+          current?.id === next.id ? { ...current, open: false } : current,
+        );
         return;
       }
       if (next.kind === 'sandwich') setSandwichFx(next);
@@ -218,8 +246,16 @@ export function TradeFxProvider({ children }: { children: React.ReactNode }) {
   return (
     <>
       {children}
-      <PerpSuccessScreen fx={perpFx} onClose={() => setPerpFx(null)} />
-      <SandwichSuccessScreen fx={sandwichFx} onClose={() => setSandwichFx(null)} />
+      <PerpSuccessScreen
+        fx={perpFx}
+        onClose={() => setPerpFx((current) => (current ? { ...current, open: false } : null))}
+      />
+      <SandwichSuccessScreen
+        fx={sandwichFx}
+        onClose={() =>
+          setSandwichFx((current) => (current ? { ...current, open: false } : null))
+        }
+      />
     </>
   );
 }
@@ -264,7 +300,7 @@ function PerpSuccessScreen({
       // Keyed per event so a second trade replays the burst from zero instead
       // of leaving the previous one's springs settled.
       key={fx.id}
-      visible
+      visible={fx.open}
       loading={fx.loading ?? false}
       amount={
         amount != null && Number.isFinite(amount) && amount > 0
@@ -349,8 +385,8 @@ function SandwichSuccessScreen({
       // Keyed per event so a second trade replays the burst from zero instead
       // of leaving the previous one's springs settled.
       key={fx.id}
-      visible
-      loading={false}
+      visible={fx.open}
+      loading={fx.loading ?? false}
       // Whole dollars: the cents on a basket buy are noise on a receipt whose
       // job is "you bought $100 of this", and they cost the figure its weight.
       amount={
@@ -372,7 +408,7 @@ function SandwichSuccessScreen({
       sourcePost={fx.source ?? null}
       sourceCaption={fx.caption ?? null}
       onClose={onClose}
-      onAddThesis={!isSell && fx.thesis ? () => openThesisComposer(fx.thesis!) : undefined}
+      onAddThesis={!isSell && !fx.loading && fx.thesis ? () => openThesisComposer(fx.thesis!) : undefined}
     />
   );
 }
