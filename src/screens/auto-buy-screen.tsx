@@ -15,6 +15,7 @@ import {
   TextInput,
   View,
   useWindowDimensions,
+  Image,
 } from "react-native";
 import {
   BottomSheetBackdrop,
@@ -391,6 +392,12 @@ export function AutoBuyScreen({ showBackButton = true }: { showBackButton?: bool
     }
   }
 
+  // the connected account's X profile picture (same unavatar source the feed uses).
+  // Above the loading return: hooks must run on every render.
+  const xAvatarUrl = xStatus?.xHandle ? `https://unavatar.io/x/${xStatus.xHandle.replace(/^@/, "")}` : null;
+  const [xAvatarFailed, setXAvatarFailed] = useState(false);
+  useEffect(() => setXAvatarFailed(false), [xAvatarUrl]);
+
   if (loading || !config) {
     return (
       <View style={[styles.screen, styles.center]}>
@@ -449,9 +456,18 @@ export function AutoBuyScreen({ showBackButton = true }: { showBackButton?: bool
       <View style={styles.card}>
         <View style={styles.rowBetween}>
           <View style={styles.accountIdentity}>
-            <View style={styles.iconWell}>
-              <Text style={styles.xMark}>𝕏</Text>
-            </View>
+            {xAvatarUrl && !xAvatarFailed ? (
+              <Image
+                source={{ uri: xAvatarUrl }}
+                style={styles.xAvatar}
+                onError={() => setXAvatarFailed(true)}
+                accessibilityLabel={`@${xStatus?.xHandle} on X`}
+              />
+            ) : (
+              <View style={styles.iconWell}>
+                <Text style={styles.xMark}>𝕏</Text>
+              </View>
+            )}
             <View style={{ flex: 1 }}>
               <Text style={styles.cardTitle}>X account</Text>
               <HandleText style={styles.cardSub}>
@@ -577,7 +593,7 @@ export function AutoBuyScreen({ showBackButton = true }: { showBackButton?: bool
                     ? "radio-button-on"
                     : "radio-button-off"
                 }
-                size={20}
+                size={23}
                 color={
                   config.mode === "confirm" ? colors.accentDeep : colors.iconMuted
                 }
@@ -603,7 +619,7 @@ export function AutoBuyScreen({ showBackButton = true }: { showBackButton?: bool
                     ? "radio-button-on"
                     : "radio-button-off"
                 }
-                size={20}
+                size={23}
                 color={
                   config.mode === "auto" ? colors.accentDeep : colors.iconMuted
                 }
@@ -777,7 +793,7 @@ const makeStyles = (c: ThemeColors) =>
       paddingVertical: 12,
     },
     headerTitleWrap: { flex: 1, alignItems: "center" },
-    title: { fontFamily: F, fontWeight: "700", fontSize: 18, color: c.text },
+    title: { fontFamily: F, fontWeight: "700", fontSize: 20, color: c.text },
     walletTitle: {
       color: c.text,
       fontSize: 34,
@@ -879,44 +895,45 @@ const makeStyles = (c: ThemeColors) =>
       backgroundColor: c.surfaceAlt,
     },
     sectionLabel: {
-      marginTop: 14,
+      marginTop: 16,
       marginBottom: 1,
       paddingHorizontal: 3,
       color: c.textSecondary,
       fontFamily: F,
       fontWeight: "700",
-      fontSize: 13,
+      fontSize: 15,
     },
     card: {
       backgroundColor: "transparent",
       paddingHorizontal: 2,
-      paddingVertical: 14,
-      gap: 12,
+      paddingVertical: 16,
+      gap: 14,
       borderBottomWidth: StyleSheet.hairlineWidth,
       borderBottomColor: c.border,
     },
-    cardTitle: { fontFamily: F, fontWeight: "600", fontSize: 16, color: c.text },
-    cardSub: { fontFamily: F, fontWeight: "400", fontSize: 13, lineHeight: 18, color: c.textSecondary, marginTop: 2 },
-    rowBetween: { flexDirection: "row", alignItems: "center", gap: 12 },
-    accountIdentity: { flex: 1, flexDirection: "row", alignItems: "center", gap: 12 },
+    cardTitle: { fontFamily: F, fontWeight: "600", fontSize: 18, color: c.text },
+    cardSub: { fontFamily: F, fontWeight: "400", fontSize: 15, lineHeight: 21, color: c.textSecondary, marginTop: 2 },
+    rowBetween: { flexDirection: "row", alignItems: "center", gap: 14 },
+    accountIdentity: { flex: 1, flexDirection: "row", alignItems: "center", gap: 14 },
     iconWell: {
-      width: 42,
-      height: 42,
-      borderRadius: 12,
+      width: 48,
+      height: 48,
+      borderRadius: 14,
       alignItems: "center",
       justifyContent: "center",
       backgroundColor: c.text,
     },
-    xMark: { color: c.background, fontSize: 19, fontWeight: "600" },
+    xMark: { color: c.background, fontSize: 22, fontWeight: "600" },
+    xAvatar: { width: 48, height: 48, borderRadius: 24, backgroundColor: c.surfaceAlt },
     button: {
       backgroundColor: c.accent,
-      borderRadius: 999,
-      paddingHorizontal: 16,
-      paddingVertical: 10,
+      borderRadius: 1149,
+      paddingHorizontal: 18,
+      paddingVertical: 12,
       alignItems: "center",
       justifyContent: "center",
     },
-    buttonLabel: { fontFamily: F, fontWeight: "600", fontSize: 14, color: c.background },
+    buttonLabel: { fontFamily: F, fontWeight: "600", fontSize: 16, color: c.background },
     buttonGhost: { backgroundColor: c.surfaceAlt, borderWidth: 1, borderColor: c.border },
     buttonGhostLabel: { color: c.text },
     saveButton: { marginTop: 2 },
@@ -927,49 +944,49 @@ const makeStyles = (c: ThemeColors) =>
       justifyContent: "space-between",
       paddingVertical: 2,
     },
-    fieldLabel: { fontFamily: F, fontWeight: "400", fontSize: 14, color: c.text },
-    fieldHint: { marginTop: 2, fontFamily: F, fontSize: 12, color: c.textTertiary },
+    fieldLabel: { fontFamily: F, fontWeight: "400", fontSize: 16, color: c.text },
+    fieldHint: { marginTop: 2, fontFamily: F, fontSize: 14, color: c.textTertiary },
     amountInput: {
-      minWidth: 92,
+      minWidth: 106,
       flexDirection: "row",
       alignItems: "center",
       justifyContent: "flex-end",
       backgroundColor: c.surface,
-      borderRadius: 12,
+      borderRadius: 14,
       borderWidth: StyleSheet.hairlineWidth,
       borderColor: c.border,
-      paddingLeft: 10,
+      paddingLeft: 12,
     },
-    currency: { color: c.textSecondary, fontFamily: F, fontSize: 15 },
+    currency: { color: c.textSecondary, fontFamily: F, fontSize: 17 },
     fieldInput: {
-      minWidth: 62,
+      minWidth: 71,
       textAlign: "right",
       fontFamily: F, fontWeight: "600",
-      fontSize: 16,
+      fontSize: 18,
       color: c.text,
-      paddingHorizontal: 10,
-      paddingVertical: 8,
+      paddingHorizontal: 12,
+      paddingVertical: 9,
     },
     modeRow: {
       flexDirection: "row",
       alignItems: "flex-start",
-      gap: 10,
-      paddingVertical: 12,
+      gap: 12,
+      paddingVertical: 14,
       paddingHorizontal: 2,
     },
     modeRowActive: {},
-    modeTitle: { fontFamily: F, fontWeight: "600", fontSize: 15, color: c.text },
+    modeTitle: { fontFamily: F, fontWeight: "600", fontSize: 17, color: c.text },
     error: {
       fontFamily: F, fontWeight: "400",
-      fontSize: 13,
+      fontSize: 15,
       color: c.negative,
-      paddingHorizontal: 4,
+      paddingHorizontal: 5,
     },
     disclosure: {
       fontFamily: F, fontWeight: "400",
-      fontSize: 12,
+      fontSize: 14,
       color: c.textSecondary,
-      paddingHorizontal: 8,
-      lineHeight: 17,
+      paddingHorizontal: 9,
+      lineHeight: 20,
     },
   });

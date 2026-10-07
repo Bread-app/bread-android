@@ -105,7 +105,7 @@ import {
 const F = Fonts.rounded;
 
 const COLOR_UP = '#02ED45';
-const COLOR_DOWN = '#FF1AB8';
+const COLOR_DOWN = '#D2042D';
 const RANGES: PortfolioRange[] = ['24H', '7d', '30d'];
 
 type Tab = 'holdings' | 'sandwiches';

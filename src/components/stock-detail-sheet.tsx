@@ -763,6 +763,7 @@ function SandwichesSection({
             onToggleLike={handleToggleLike}
             onComment={(sandwich) => onOpenSandwich(sandwich, { showComments: true })}
             onShare={handleShare}
+            showRemix={false}
             saved={savedControls}
           />
         );

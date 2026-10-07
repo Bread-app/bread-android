@@ -78,7 +78,7 @@ const APP_GREEN = '#02ED45';
 /** The same green as type rather than as a badge — #35F046 on white is
  *  unreadable at 15px, so numbers get the ink version of it. */
 const BRAND_GREEN_INK = '#16A34A';
-const BRAND_RED = '#FF1AB8';
+const BRAND_RED = '#D2042D';
 
 /**
  * How much of the bottom edge the share + close block occupies, above the

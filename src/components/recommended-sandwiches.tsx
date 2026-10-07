@@ -105,13 +105,15 @@ export function RecommendedSandwiches({
 
 const makeStyles = (c: ThemeColors) =>
   StyleSheet.create({
+    // Same inset as the asset rows above, so avatars share their left edge.
     section: {
       marginTop: 16,
+      paddingHorizontal: 10,
     },
     title: {
       color: c.textSecondary,
-      fontSize: 13,
-      fontWeight: "800",
+      fontSize: 17,
+      fontWeight: "600",
       fontFamily: F,
       marginBottom: 4,
     },

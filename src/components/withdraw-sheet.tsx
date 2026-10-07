@@ -439,7 +439,7 @@ export const WithdrawSheet = forwardRef<WithdrawSheetRef, object>(function Withd
               changePositive
               // Sell-button styling: the default solid confirm button tinted the
               // sell magenta (matches the stock Sell CTA).
-              accentColor="#FF1AB8"
+              accentColor="#D2042D"
               amount={amount}
               amountUnitSymbol="$"
               amountUnitLabel="dollars"

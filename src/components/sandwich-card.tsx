@@ -1063,7 +1063,10 @@ export const SandwichCard = React.memo(function SandwichCard({
                   {sourceAuthor.name}
                 </>
               ) : videoChannel ? (
-                videoChannel.name.replace(/^@/, "")
+                <>
+                  {/^@?\S+$/.test(videoChannel.name) ? <Text style={styles.cardHandleAt}>@</Text> : null}
+                  {videoChannel.name.replace(/^@/, "")}
+                </>
               ) : creator ? (
                 <>
                   <Text style={styles.cardHandleAt}>@</Text>
@@ -1359,6 +1362,8 @@ export const PodcastGroupCard = React.memo(function PodcastGroupCard({
   const creator = primary ? getBuilderMeta(primary) : null;
   const handle = video.channelHandle ?? video.channelName ?? creator?.name ?? "YouTube";
   const router = useRouter();
+  const composer = useOptionalSandwichComposer();
+  const detail = useOptionalSandwichDetail();
   const creatorPrivyUserId = creator ? primary?.source.user?.privyUserId ?? null : null;
 
   if (!primary) return null;
@@ -1387,6 +1392,7 @@ export const PodcastGroupCard = React.memo(function PodcastGroupCard({
         <View style={styles.cardContent}>
           <View style={styles.cardCreatorRow}>
             <Text numberOfLines={1} style={styles.cardHandle}>
+              {/^@?\S+$/.test(handle) ? <Text style={styles.cardHandleAt}>@</Text> : null}
               {handle.replace(/^@/, "")}
             </Text>
             {/* The channel leads the card, so the mark says where the episode
@@ -1455,6 +1461,29 @@ export const PodcastGroupCard = React.memo(function PodcastGroupCard({
                 </Text>
               </View>
             </PressableScale>
+            {/* Same remix slot as the post card, so both rows line up; it
+                remixes the episode's lead market. */}
+            {composer ? (
+              <PressableScale
+                accessibilityRole="button"
+                accessibilityLabel="Remix sandwich"
+                accessibilityHint="Opens this episode's lead market in the composer to change and publish as your own"
+                onPress={(event) => {
+                  event.stopPropagation();
+                  void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  composer.open({
+                    remixOf: primary,
+                    onCreated: (created) => {
+                      toast.showToast("Your remix is live", "success");
+                      detail?.open(created);
+                    },
+                  });
+                }}
+                style={styles.cardActionButton}
+              >
+                <RemixIcon size={20} color={colors.textSecondary} />
+              </PressableScale>
+            ) : null}
             {POST_COMMENTS_ENABLED ? (
               <PressableScale
                 accessibilityRole="button"

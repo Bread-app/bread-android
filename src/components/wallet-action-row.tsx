@@ -28,7 +28,9 @@ type Props = {
  * child of one.
  */
 export function WalletActionRow({ onAddCash, onWithdraw }: Props) {
-  const { colors } = useThemeStore();
+  const { colors, scheme } = useThemeStore();
+  // the glass Withdraw button is near-black in dark mode, so its label flips to light
+  const withdrawLabel = scheme === 'dark' ? 'rgba(255,255,255,0.8)' : 'rgba(0,0,0,0.55)';
   const [rowWidth, setRowWidth] = useState(0);
   const buttonWidth = (rowWidth - GAP) / 2;
 
@@ -58,7 +60,7 @@ export function WalletActionRow({ onAddCash, onWithdraw }: Props) {
               color={colors.actionSell}
               modifiers={[frame({ width: buttonWidth, height: HEIGHT })]}
               onPress={onWithdraw}>
-              <SwiftUIText weight="bold" color="rgba(0,0,0,0.55)">
+              <SwiftUIText weight="bold" color={withdrawLabel}>
                 Withdraw
               </SwiftUIText>
             </SwiftUIButton>
@@ -78,7 +80,7 @@ export function WalletActionRow({ onAddCash, onWithdraw }: Props) {
             variant="glass"
             tint={colors.actionSell}
             label="Withdraw"
-            labelColor="rgba(0,0,0,0.55)"
+            labelColor={withdrawLabel}
             width={buttonWidth}
             height={HEIGHT}
             onPress={onWithdraw}

@@ -3320,7 +3320,7 @@ function getSideMeta(leg: SandwichLeg) {
     : isShortOrNo ? "SHORT" : "LONG";
   const color = isMarket
     ? isShortOrNo ? "#7d3ad6" : "#1d6cd6"
-    : isShortOrNo ? "#FF1AB8" : "#1f9d6b";
+    : isShortOrNo ? "#D2042D" : "#1f9d6b";
   return { label, color };
 }
 
@@ -3708,7 +3708,7 @@ function MiniSparkline({ seed, up }: { seed: string; up: boolean }) {
     return { line: linePath, area: areaPath };
   }, [seed, up]);
 
-  const stroke = up ? "#22C55E" : "#FF33C9";
+  const stroke = up ? "#22C55E" : "#E8213F";
   const fill = up ? "rgba(34,197,94,0.12)" : "rgba(255,51,201,0.12)";
 
   return (
@@ -6246,12 +6246,6 @@ export function SandwichDetailScreen() {
                           </View>
                         </View>
                       ) : null}
-                      {sandwich ? (
-                        <RecommendedSandwiches
-                          sandwich={sandwich}
-                          onOpen={(next, options) => openSandwichDetail(next, options)}
-                        />
-                      ) : null}
                       <Pressable
                         accessibilityRole="button"
                         accessibilityLabel={thesisExpanded ? "Show less" : "Show more"}
@@ -6272,15 +6266,15 @@ export function SandwichDetailScreen() {
                       </Pressable>
                       </View>
                     </ScaledSandwichSection>
-                  ) : sandwich ? (
-                    // No thesis to expand, so no Show More — the row still
-                    // sits in the same spot, right under the legs.
-                    <ScaledSandwichSection scale={elementScales.details}>
-                      <RecommendedSandwiches
-                        sandwich={sandwich}
-                        onOpen={(next, options) => openSandwichDetail(next, options)}
-                      />
-                    </ScaledSandwichSection>
+                  ) : null}
+
+                  {/* Outside the scaled details section: the feed cards keep
+                      their own size and line up with the asset rows. */}
+                  {sandwich ? (
+                    <RecommendedSandwiches
+                      sandwich={sandwich}
+                      onOpen={(next, options) => openSandwichDetail(next, options)}
+                    />
                   ) : null}
 
                   {/* Takes — what HOLDERS said while holding, between the
@@ -7752,7 +7746,7 @@ const makeStyles = (c: ThemeColors) => {
     justifyContent: "center",
   },
   composerNavCancelText: {
-    color: ink("#FF1AB8", "#FF33C9"),
+    color: ink("#D2042D", "#E8213F"),
     fontSize: 16,
     fontWeight: "700",
     fontFamily: F,
@@ -8438,7 +8432,7 @@ const makeStyles = (c: ThemeColors) => {
     color: ink("#16A34A", "#4ade80"),
   },
   stockChangeDown: {
-    color: ink("#FF1AB8", "#FF33C9"),
+    color: ink("#D2042D", "#E8213F"),
   },
   comingSoonWrap: {
     paddingTop: 56,
@@ -8579,13 +8573,13 @@ const makeStyles = (c: ThemeColors) => {
     fontFamily: F,
   },
   legConfigRemove: {
-    backgroundColor: wash("#FF1AB8", "#FFF0F8"),
+    backgroundColor: wash("#D2042D", "#FFEFF1"),
     paddingHorizontal: 16,
     paddingVertical: 10,
     borderRadius: 20,
   },
   legConfigRemoveText: {
-    color: ink("#FF1AB8", "#FF33C9"),
+    color: ink("#D2042D", "#E8213F"),
     fontSize: 14,
     fontWeight: "800",
     fontFamily: F,
@@ -10352,12 +10346,12 @@ const makeStyles = (c: ThemeColors) => {
     marginTop: 2,
     padding: 12,
     borderRadius: 14,
-    backgroundColor: wash("#FF1AB8", "#FFF0F8"),
+    backgroundColor: wash("#D2042D", "#FFEFF1"),
     borderWidth: 1,
-    borderColor: ink("#FFD0EF", withAlpha("#FF33C9", 0.4)),
+    borderColor: ink("#FFD2D9", withAlpha("#E8213F", 0.4)),
   },
   thesisComposerErrorText: {
-    color: ink("#FF1AB8", "#FF66D4"),
+    color: ink("#D2042D", "#FF5A70"),
     fontSize: 14,
     lineHeight: 20,
     fontWeight: "700",
@@ -10896,7 +10890,7 @@ const makeStyles = (c: ThemeColors) => {
     backgroundColor: wash("#22C55E", "#E6F9EC"),
   },
   previewLegSideChipShort: {
-    backgroundColor: wash("#FF1AB8", "#FFF0F8"),
+    backgroundColor: wash("#D2042D", "#FFEFF1"),
   },
   previewLegSideLabel: {
     fontSize: 10,
@@ -10908,7 +10902,7 @@ const makeStyles = (c: ThemeColors) => {
     color: ink("#059669", "#4ade80"),
   },
   previewLegSideLabelShort: {
-    color: ink("#FF1AB8", "#FF33C9"),
+    color: ink("#D2042D", "#E8213F"),
   },
   previewLegSubtitle: {
     marginTop: 4,
@@ -10940,7 +10934,7 @@ const makeStyles = (c: ThemeColors) => {
     fontWeight: "900",
   },
   composerLegsTotalWarn: {
-    color: ink("#FF1AB8", "#FF66D4"),
+    color: ink("#D2042D", "#FF5A70"),
   },
   composerLegEmpty: {
     backgroundColor: c.background,
@@ -11030,7 +11024,7 @@ const makeStyles = (c: ThemeColors) => {
     backgroundColor: "#1f9d6b",
   },
   composerSideShort: {
-    backgroundColor: "#FF1AB8",
+    backgroundColor: "#D2042D",
   },
   composerSideYes: {
     backgroundColor: "#1d6cd6",
@@ -11393,7 +11387,7 @@ const makeStyles = (c: ThemeColors) => {
     borderColor: c.text,
   },
   pickerWeightInputWrapWarn: {
-    borderColor: ink("#FFD0EF", withAlpha("#FF33C9", 0.4)),
+    borderColor: ink("#FFD2D9", withAlpha("#E8213F", 0.4)),
   },
   pickerWeightInputBig: {
     color: c.text,
@@ -11414,7 +11408,7 @@ const makeStyles = (c: ThemeColors) => {
   },
   pickerWeightWarn: {
     marginTop: 8,
-    color: ink("#FF1AB8", "#FF66D4"),
+    color: ink("#D2042D", "#FF5A70"),
     fontSize: 12,
     fontWeight: "700",
     fontFamily: F,

@@ -44,7 +44,7 @@ function changeColor(value: number | null): string {
     return '#000000';
   }
 
-  return value > 0 ? '#02ED45' : '#FF1AB8';
+  return value > 0 ? '#02ED45' : '#D2042D';
 }
 
 function cleanStockSymbol(symbol: string): string {

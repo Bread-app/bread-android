@@ -2,16 +2,15 @@ import React from 'react';
 import { Pressable, StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
 
 import { Fonts } from '@/constants/theme';
+import { useThemeStore } from '@/lib/theme-store';
 
 const F = Fonts.rounded;
 
-// Fixed promo palette — this card is a bright, deliberately-standout surface
-// (white in either theme), so its colours don't come from the theme tokens.
-const CARD_BG = '#FFFFFF';
-const CARD_BORDER = '#ECEDF1';
-const INK = '#0B0B0F';
+// Promo palette — a bright, standout card in light mode; in dark mode it sits on
+// the app's dark surface instead of glaring white, with the X tile as a white outline.
+const LIGHT = { bg: '#FFFFFF', border: '#ECEDF1', ink: '#0B0B0F', strong: '#000000', xTile: '#000000', xStroke: 'transparent', xGlyph: '#FFFFFF', cta: '#2563EB' };
+const DARK = { bg: '#1a1b1f', border: '#2a2c31', ink: '#FFFFFF', strong: '#FFFFFF', xTile: 'transparent', xStroke: '#FFFFFF', xGlyph: '#FFFFFF', cta: '#38BDF8' };
 const PINK = '#FF2E97';
-const BLUE = '#2563EB';
 
 type Props = {
   onPress: () => void;
@@ -24,25 +23,27 @@ type Props = {
  * the flow the caller wires up.
  */
 export function LikeToBuyCard({ onPress, style }: Props) {
+  const { scheme } = useThemeStore();
+  const p = scheme === 'dark' ? DARK : LIGHT;
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel="Like X posts to buy into their thesis — see how it works"
       onPress={onPress}
-      style={({ pressed }) => [styles.card, style, pressed && styles.pressed]}
+      style={({ pressed }) => [styles.card, { backgroundColor: p.bg, borderColor: p.border }, style, pressed && styles.pressed]}
     >
       <View style={styles.headline}>
         <Text style={[styles.word, styles.pink]}>Like</Text>
-        <View style={styles.xLogo}>
-          <Text style={styles.xGlyph}>𝕏</Text>
+        <View style={[styles.xLogo, { backgroundColor: p.xTile, borderColor: p.xStroke }]}>
+          <Text style={[styles.xGlyph, { color: p.xGlyph }]}>𝕏</Text>
         </View>
-        <Text style={styles.word}>posts to</Text>
-        <Text style={[styles.word, styles.black]}>buy</Text>
+        <Text style={[styles.word, { color: p.ink }]}>posts to</Text>
+        <Text style={[styles.word, { color: p.strong }]}>buy</Text>
       </View>
-      <Text style={[styles.word, styles.line2]}>into their thesis</Text>
+      <Text style={[styles.word, styles.line2, { color: p.ink }]}>into their thesis</Text>
 
       <View style={styles.ctaRow}>
-        <Text style={styles.cta}>see how it works →</Text>
+        <Text style={[styles.cta, { color: p.cta }]}>see how it works →</Text>
       </View>
     </Pressable>
   );
@@ -50,10 +51,8 @@ export function LikeToBuyCard({ onPress, style }: Props) {
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: CARD_BG,
     borderRadius: 22,
     borderWidth: 1,
-    borderColor: CARD_BORDER,
     marginHorizontal: 6,
     paddingHorizontal: 18,
     paddingTop: 18,
@@ -74,7 +73,6 @@ const styles = StyleSheet.create({
   },
   word: {
     fontFamily: F,
-    color: INK,
     fontSize: 23,
     lineHeight: 28,
     fontWeight: '900',
@@ -82,18 +80,16 @@ const styles = StyleSheet.create({
   },
   line2: { marginTop: 4 },
   pink: { color: PINK },
-  black: { color: '#000000' },
   xLogo: {
     width: 32,
     height: 32,
     borderRadius: 9,
-    backgroundColor: '#000000',
+    borderWidth: 1.5,
     alignItems: 'center',
     justifyContent: 'center',
   },
   xGlyph: {
     fontFamily: F,
-    color: '#FFFFFF',
     fontSize: 19,
     fontWeight: '700',
     marginTop: -1,
@@ -104,7 +100,6 @@ const styles = StyleSheet.create({
   },
   cta: {
     fontFamily: F,
-    color: BLUE,
     fontSize: 15,
     fontWeight: '800',
     letterSpacing: -0.2,

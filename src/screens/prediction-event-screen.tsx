@@ -16,7 +16,7 @@ import { PressableScale } from '@/components/pressable-scale';
 const F = Fonts.rounded;
 
 const YES = "#35F046";
-const NO = "#FF1AB8";
+const NO = "#D2042D";
 
 /**
  * A prediction EVENT ("Who wins TX-Sen?") with its outcome markets ("John

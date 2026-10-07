@@ -56,7 +56,7 @@ import { maxBuyAmount } from '@/lib/max-buy';
 const F = Fonts.rounded;
 
 const YES = '#35F046';
-const NO = '#FF1AB8';
+const NO = '#D2042D';
 
 const YES_GRADIENT = ['#38FF60', '#00E82E'] as const;
 const NO_GRADIENT = ['#FF4FB8', '#FF0090'] as const;
@@ -100,7 +100,7 @@ function formatEndDate(iso: string | null): string {
 }
 
 const BRAND_GREEN = '#35F046';
-const BRAND_RED = '#FF1AB8';
+const BRAND_RED = '#D2042D';
 const HAS_GLASS = Platform.OS === 'ios' && isGlassEffectAPIAvailable();
 
 type PredictionMarketDetailSheetProps = {

@@ -205,7 +205,7 @@ const F = Fonts.rounded;
 // Realized P&L graph (own profile) — mirrors the other-user profile screen.
 const PORTFOLIO_RANGES: PortfolioRange[] = ["24H", "7d", "30d"];
 const PORTFOLIO_UP = "#02ED45";
-const PORTFOLIO_DOWN = "#FF1AB8";
+const PORTFOLIO_DOWN = "#D2042D";
 
 // Hide dust holdings: anything under this USD value rounds to "$0.00" and reads
 // as a placeholder row, so we drop it from the Holdings list entirely.
@@ -5201,7 +5201,7 @@ const makeStyles = (c: ThemeColors) => {
     backgroundColor: c.accent,
   },
   sandwichSellButton: {
-    backgroundColor: wash(c.negative, "#fff0f8"),
+    backgroundColor: wash(c.negative, "#FFEFF1"),
   },
   sandwichBuyButtonText: {
     color: "#ffffff",
@@ -5265,7 +5265,7 @@ const makeStyles = (c: ThemeColors) => {
   },
   positionSellButton: {
     borderRadius: 999,
-    backgroundColor: wash(c.negative, "#fff0f8"),
+    backgroundColor: wash(c.negative, "#FFEFF1"),
     paddingHorizontal: 12,
     paddingVertical: 5,
   },
