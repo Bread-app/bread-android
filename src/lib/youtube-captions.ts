@@ -30,7 +30,13 @@ export async function fetchCaptions(videoId: string): Promise<CaptionSegment[] |
   // this is the one call in the flow that goes somewhere other than our API.
   if (isDemoMode()) return null;
   try {
-    const raw = await YoutubeTranscript.fetchTranscript(videoId);
+    // Without a lang the library takes captionTracks[0], and YouTube lists its
+    // auto-translated tracks alphabetically — so English podcasts arrived as
+    // Arabic ("ar"). Ask for English first; fall back to the default track for
+    // videos that genuinely have no English captions.
+    const raw = await YoutubeTranscript.fetchTranscript(videoId, { lang: 'en' }).catch(() =>
+      YoutubeTranscript.fetchTranscript(videoId),
+    );
     if (!Array.isArray(raw) || raw.length === 0) return null;
     const segments = raw.slice(0, MAX_SEGMENTS).flatMap((row): CaptionSegment[] => {
       const text = typeof row?.text === 'string' ? row.text : '';
