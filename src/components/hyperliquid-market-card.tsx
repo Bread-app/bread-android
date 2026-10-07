@@ -6,7 +6,8 @@ import { HyperliquidCoinLogo } from '@/components/hyperliquid-logo';
 import { Fonts, type ThemeColors } from '@/constants/theme';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
 import type { HyperliquidMarket } from '@/lib/hyperliquid-api';
-import { hyperliquidChangePercent } from '@/lib/hyperliquid-perp-market';
+import { hyperliquidChangePercent, hyperliquidPerpOnlyStock } from '@/lib/hyperliquid-perp-market';
+import { NATIVE_ZOOM_SOURCE_TEST_ID, useIsNativeZoomSource } from '@/lib/native-zoom';
 import { useThemeStore } from '@/lib/theme-store';
 import { measureZoomSource, type ZoomSourceRect } from '@/lib/zoom-transition';
 
@@ -29,6 +30,7 @@ export function HyperliquidMarketCard({
   onPress: (market: HyperliquidMarket, source: ZoomSourceRect | null) => void;
 }) {
   const cardRef = useRef<ViewType>(null);
+  const isZoomSource = useIsNativeZoomSource(hyperliquidPerpOnlyStock(market).id);
   const styles = useThemedStyles(makeStyles);
   const { colors } = useThemeStore();
   const change = hyperliquidChangePercent(market);
@@ -37,6 +39,7 @@ export function HyperliquidMarketCard({
   return (
     <Pressable
       ref={cardRef}
+      testID={isZoomSource ? NATIVE_ZOOM_SOURCE_TEST_ID : undefined}
       onPress={() => {
         void measureZoomSource(cardRef, CARD_RADIUS).then((source) => onPress(market, source));
       }}

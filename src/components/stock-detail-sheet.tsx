@@ -2469,7 +2469,7 @@ function StockDetailSheet({
                         <View style={styles.marketTogglePlaceholder} />
                       </View>
                     ) : null}
-                    <View style={styles.headerRow} testID={embeddedHeaderTestID}>
+                    <View style={styles.headerRow} testID={marketMode === 'spot' ? embeddedHeaderTestID : undefined}>
                       <View style={styles.headerLeft}>
                         <View style={styles.stickerOuter}>
                           <AssetLogo
@@ -2863,6 +2863,7 @@ function StockDetailSheet({
             embeddedScrollY={perpScrollY}
             embeddedChartGestureActive={embeddedChartGestureActive}
             embeddedTopInset={embeddedTopInset}
+            embeddedHeaderTestID={marketMode === 'perp' ? embeddedHeaderTestID : undefined}
             embeddedTogglePinned={embeddedToggleTop != null}
             onEmbeddedActionStateChange={onEmbeddedPerpActionStateChange}
             onEmbeddedQuoteChange={perpQuoteStore.set}

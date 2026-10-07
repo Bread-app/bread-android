@@ -247,6 +247,8 @@ type PhoenixMarketDetailSheetProps = {
   embeddedHolderCount?: number | null;
   /** Actions shared with the spot header (for example share and save). */
   embeddedHeaderActions?: React.ReactNode;
+  /** Native zoom aligns the tapped market row with this header. */
+  embeddedHeaderTestID?: string;
   /**
    * The host pins the Spot/Perp toggle beside its own back button, so this
    * header must not reserve a row for it above the market identity.
@@ -349,6 +351,7 @@ const PhoenixMarketDetailSheetContent = forwardRef<
     embeddedHoldersContent,
     embeddedHolderCount = null,
     embeddedHeaderActions,
+    embeddedHeaderTestID,
     embeddedTogglePinned = false,
     embeddedIconUri = null,
     embeddedDisableGlass = false,
@@ -1377,7 +1380,7 @@ const PhoenixMarketDetailSheetContent = forwardRef<
             {embeddedTogglePinned ? null : <View style={styles.togglePlaceholder} />}
           </View>
         ) : null}
-        <View style={styles.headerRow}>
+        <View style={styles.headerRow} testID={embeddedHeaderTestID}>
           <View style={styles.headerLeft}>
             <AssetLogo
               {...perpLogoSources(market, embeddedIconUri)}
