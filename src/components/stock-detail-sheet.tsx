@@ -1097,7 +1097,7 @@ function PositionCard({
       : null;
 
   const positive = (unrealizedPnl ?? 0) >= 0;
-  const pnlColor = positive ? '#02ED45' : '#E83E67';
+  const pnlColor = positive ? '#02ED45' : colors.negative;
 
   // No current value means the quote hasn't landed yet — every figure derived
   // from it (the position's worth, and both P&L readouts) is pending, not

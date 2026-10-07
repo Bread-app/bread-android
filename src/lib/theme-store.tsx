@@ -128,7 +128,10 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
         if (token === 'actionPrimary') routeOverrides.accentBlue = color;
         if (token === 'actionPrimaryText') routeOverrides.textInverse = color;
         if (token === 'actionBuy') routeOverrides.accent = color;
-        if (token === 'actionSell') routeOverrides.negative = color;
+        if (token === 'actionSell') {
+          routeOverrides.negative = color;
+          routeOverrides.chartNegative = color;
+        }
         return { ...current, [previewStorageKey]: routeOverrides };
       });
     },

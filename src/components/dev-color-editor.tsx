@@ -19,7 +19,6 @@ import { type ThemeColor } from '@/constants/theme';
 import {
   contrastRatio,
   hsvaToColor,
-  hsvaToRgba,
   parseColor,
   rgbaToHsva,
   type HsvaColor,
@@ -56,7 +55,7 @@ const TOKEN_GROUPS: TokenGroup[] = [
       { token: 'actionPrimary', label: 'Primary button' },
       { token: 'actionPrimaryText', label: 'Primary button text' },
       { token: 'actionBuy', label: 'Buy action' },
-      { token: 'actionSell', label: 'Sell action' },
+      { token: 'actionSell', label: 'Sell / negative' },
     ],
   },
   {
@@ -79,7 +78,7 @@ const TOKEN_GROUPS: TokenGroup[] = [
   },
 ];
 
-const DEFAULT_RECENTS = ['#38BDF8', '#35F046', '#EE1E52', '#FFFFFF', '#0B1622'];
+const DEFAULT_RECENTS = ['#38BDF8', '#35F046', '#FF1AB8', '#FFFFFF', '#0B1622'];
 const HUE_COLORS = ['#FF0000', '#FFFF00', '#00FF00', '#00FFFF', '#0000FF', '#FF00FF', '#FF0000'] as const;
 
 function readableToken(token: ThemeColor) {
@@ -97,9 +96,9 @@ export function DevColorEditor() {
     resetAllPreviews,
   } = useThemePreview();
   const [visible, setVisible] = useState(false);
-  const [selectedToken, setSelectedToken] = useState<ThemeColor>('actionPrimary');
-  const [hsva, setHsva] = useState<HsvaColor>(() => rgbaToHsva(parseColor(colors.actionPrimary)!));
-  const [inputValue, setInputValue] = useState(colors.actionPrimary);
+  const [selectedToken, setSelectedToken] = useState<ThemeColor>('actionSell');
+  const [hsva, setHsva] = useState<HsvaColor>(() => rgbaToHsva(parseColor(colors.actionSell)!));
+  const [inputValue, setInputValue] = useState(colors.actionSell);
   const [inputError, setInputError] = useState<string | null>(null);
   const [svSize, setSvSize] = useState({ width: 1, height: 1 });
   const [hueWidth, setHueWidth] = useState(1);
@@ -186,7 +185,7 @@ export function DevColorEditor() {
           pressed && styles.pressed,
         ]}
       >
-        <LinearGradient colors={['#38BDF8', '#8B5CF6', '#EE1E52']} style={styles.launcherFill}>
+        <LinearGradient colors={['#38BDF8', '#8B5CF6', '#FF1AB8']} style={styles.launcherFill}>
           <Ionicons name="color-palette" size={22} color="#FFFFFF" />
         </LinearGradient>
       </Pressable>
@@ -433,8 +432,8 @@ const styles = StyleSheet.create({
   sliderThumb: { position: 'absolute', top: 10, width: 18, height: 20, borderRadius: 9, backgroundColor: '#FFFFFF', borderWidth: 2, borderColor: '#111318' },
   alphaTrack: { backgroundColor: '#252A32', borderRadius: 10, paddingHorizontal: 0 },
   input: { minHeight: 46, borderRadius: 12, borderWidth: 1, borderColor: '#39404A', backgroundColor: '#1A1D23', color: '#FFFFFF', paddingHorizontal: 14, fontSize: 15, fontWeight: '700' },
-  inputError: { borderColor: '#FB7185' },
-  errorText: { color: '#FDA4AF', fontSize: 12, marginTop: 6 },
+  inputError: { borderColor: '#FF33C9' },
+  errorText: { color: '#FF66D4', fontSize: 12, marginTop: 6 },
   contrastText: { color: '#86EFAC', fontSize: 12, marginTop: 7 },
   contrastWarning: { color: '#FBBF24' },
   recentRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
@@ -442,8 +441,8 @@ const styles = StyleSheet.create({
   recentSwatch: { flex: 1, borderRadius: 8, borderWidth: StyleSheet.hairlineWidth, borderColor: '#FFFFFF55' },
   resetRow: { flexDirection: 'row', gap: 10, marginTop: 20, marginBottom: 6 },
   resetButton: { minHeight: 46, flex: 1, borderRadius: 13, alignItems: 'center', justifyContent: 'center', backgroundColor: '#242830', borderWidth: 1, borderColor: '#39404A' },
-  resetAllButton: { backgroundColor: '#3A1821', borderColor: '#6B2636' },
+  resetAllButton: { backgroundColor: 'rgba(255,26,184,0.16)', borderColor: 'rgba(255,26,184,0.4)' },
   resetText: { color: '#E5E7EB', fontWeight: '800', fontSize: 13 },
-  resetAllText: { color: '#FDA4AF', fontWeight: '800', fontSize: 13 },
+  resetAllText: { color: '#FF66D4', fontWeight: '800', fontSize: 13 },
   disabled: { opacity: 0.38 },
 });

@@ -64,7 +64,9 @@ export const Colors: { light: ThemeColors; dark: ThemeColors } = {
     surface: '#ffffff',
     surfaceAlt: '#F0F0F3',
     surfaceSelected: '#E0E1E6',
-    text: '#0b1622',
+    // Slightly translucent ink softens primary copy on light surfaces without
+    // dimming coloured labels, icons, or any dark-mode content.
+    text: 'rgba(11, 22, 34, 0.84)',
     textSecondary: '#565A62',
     textTertiary: '#6D7686',
     textQuaternary: '#98A1B1',
@@ -76,16 +78,16 @@ export const Colors: { light: ThemeColors; dark: ThemeColors } = {
     accentDeep: '#02ED45',
     accentBlue: '#38BDF8',
     positive: '#02ED45',
-    negative: '#EE1E52',
+    negative: '#FF1AB8',
     actionPrimary: '#38BDF8',
     actionPrimaryText: '#FFFFFF',
     actionBuy: '#35F046',
-    actionSell: '#EE1E52',
+    actionSell: '#FF1AB8',
     chartPositive: '#35F046',
-    // A step brighter than the cherry red the sell/negative tokens carry: on a
+    // A step brighter than the hot pink the sell/negative tokens carry: on a
     // chart it is a 1-2pt line, not a filled pill, and the deeper tone read as
     // muddy against both grounds.
-    chartNegative: '#E5173F',
+    chartNegative: '#FF33C9',
     chartNeutral: '#94A3B8',
     chartGrid: '#E8EEF4',
     chartCrosshair: '#10223D',
@@ -113,13 +115,13 @@ export const Colors: { light: ThemeColors; dark: ThemeColors } = {
     accentBlue: '#38BDF8',
     // Green for text/status is unified app-wide (graphs keep chartPositive).
     positive: '#02ED45',
-    negative: '#EE1E52',
+    negative: '#FF1AB8',
     actionPrimary: '#38BDF8',
     actionPrimaryText: '#FFFFFF',
     actionBuy: '#35F046',
-    actionSell: '#EE1E52',
+    actionSell: '#FF1AB8',
     chartPositive: '#35F046',
-    chartNegative: '#E5173F',
+    chartNegative: '#FF33C9',
     chartNeutral: '#7C828C',
     chartGrid: '#2A2C31',
     chartCrosshair: '#E6E8EB',
@@ -205,7 +207,7 @@ export const Fonts = Platform.select({
  * 4 quaternary  `textQuaternary`  decorative / disabled      separator glyphs, disabled labels
  *
  * Contrast against `background` (light / dark):
- *   primary 18.2 / 19.6  ·  secondary 6.9 / 9.4  ·  tertiary 4.6 / 5.9  ·  quaternary 2.6 / 3.1
+ *   primary 11.3 / 19.6  ·  secondary 6.9 / 9.4  ·  tertiary 4.6 / 5.9  ·  quaternary 2.6 / 3.1
  *
  * Rungs 1–3 clear WCAG AA for body text in both modes; rung 4 is deliberately
  * sub-AA and must only carry decoration that is never the sole source of

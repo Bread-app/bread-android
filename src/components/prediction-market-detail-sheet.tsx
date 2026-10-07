@@ -56,7 +56,7 @@ import { maxBuyAmount } from '@/lib/max-buy';
 const F = Fonts.rounded;
 
 const YES = '#35F046';
-const NO = '#EE1E52';
+const NO = '#FF1AB8';
 
 const YES_GRADIENT = ['#38FF60', '#00E82E'] as const;
 const NO_GRADIENT = ['#FF4FB8', '#FF0090'] as const;
@@ -100,7 +100,7 @@ function formatEndDate(iso: string | null): string {
 }
 
 const BRAND_GREEN = '#35F046';
-const BRAND_RED = '#EE1E52';
+const BRAND_RED = '#FF1AB8';
 const HAS_GLASS = Platform.OS === 'ios' && isGlassEffectAPIAvailable();
 
 type PredictionMarketDetailSheetProps = {
@@ -128,8 +128,8 @@ export const PredictionMarketDetailSheet = forwardRef<
   };
 
   const noGlassStyle = {
-    backgroundColor: isDark ? 'rgba(238, 30, 82, 0.08)' : 'rgba(238, 30, 82, 0.04)',
-    borderColor: isDark ? 'rgba(238, 30, 82, 0.3)' : 'rgba(238, 30, 82, 0.15)',
+    backgroundColor: isDark ? 'rgba(255, 26, 184, 0.08)' : 'rgba(255, 26, 184, 0.04)',
+    borderColor: isDark ? 'rgba(255, 26, 184, 0.3)' : 'rgba(255, 26, 184, 0.15)',
     borderWidth: 1,
   };
 
@@ -147,7 +147,7 @@ export const PredictionMarketDetailSheet = forwardRef<
     styles.bottomBarButtonText,
     {
       color: '#ffffff',
-      textShadowColor: 'rgba(238, 30, 82, 0.4)',
+      textShadowColor: 'rgba(255, 26, 184, 0.4)',
       textShadowOffset: { width: 0, height: 0 },
       textShadowRadius: 6,
     },
@@ -543,7 +543,7 @@ export const PredictionMarketDetailSheet = forwardRef<
           <GlassView
             glassEffectStyle="clear"
             isInteractive
-            tintColor={isDark ? 'rgba(238, 30, 82, 0.25)' : BRAND_RED}
+            tintColor={isDark ? 'rgba(255, 26, 184, 0.25)' : BRAND_RED}
             colorScheme={isDark ? 'dark' : 'light'}
             style={[styles.bottomBarButtonFill, noGlassStyle]}
           >
@@ -576,7 +576,7 @@ export const PredictionMarketDetailSheet = forwardRef<
         <GlassView
           glassEffectStyle="clear"
           isInteractive
-          tintColor={isDark ? 'rgba(238, 30, 82, 0.25)' : BRAND_RED}
+          tintColor={isDark ? 'rgba(255, 26, 184, 0.25)' : BRAND_RED}
           colorScheme={isDark ? 'dark' : 'light'}
           style={[styles.bottomBarButtonFill, noGlassStyle]}
         >
@@ -974,7 +974,7 @@ const makeStyles = (c: ThemeColors) => {
     probTrack: {
       height: 12,
       borderRadius: 6,
-      backgroundColor: isDark ? 'rgba(238, 30, 82,0.22)' : 'rgba(238, 30, 82,0.14)',
+      backgroundColor: isDark ? 'rgba(255,26,184,0.22)' : 'rgba(255,26,184,0.14)',
       overflow: 'hidden',
     },
     probFill: {

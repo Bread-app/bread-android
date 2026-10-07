@@ -81,7 +81,7 @@ const DEFAULT_THEME: Required<ChartTheme> = {
   // live-price pill sitting on the same scale.
   crosshairLabelColor: '#E9EDF5',
   livePriceUpColor: '#02ED45',
-  livePriceDownColor: '#EE1E52',
+  livePriceDownColor: '#FF1AB8',
 };
 
 /**

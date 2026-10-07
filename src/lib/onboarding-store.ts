@@ -3,9 +3,10 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 const STORAGE_PREFIX = 'bread_onboarding_v2_';
 
-export type OnboardingStep = 'username' | 'avatar';
+export type OnboardingStep = 'x' | 'username' | 'avatar';
 
-const STEPS: OnboardingStep[] = ['username', 'avatar'];
+// `x` sits first so the X link reads as the second half of signing in.
+const STEPS: OnboardingStep[] = ['x', 'username', 'avatar'];
 
 type OnboardingState = {
   completedSteps: OnboardingStep[];
@@ -70,15 +71,16 @@ export function useOnboardingStatus(userId: string | null) {
     ? null
     : STEPS.find((s) => !state.completedSteps.includes(s)) ?? null;
 
+  /** Marks `step` done and returns the next incomplete step, if any. */
   const markStepComplete = useCallback(
-    async (step: OnboardingStep) => {
-      if (!userId) return;
-      const next: OnboardingState = {
-        ...state,
-        completedSteps: [...new Set([...state.completedSteps, step])],
-      };
+    async (step: OnboardingStep): Promise<OnboardingStep | null> => {
+      const completedSteps = [...new Set([...state.completedSteps, step])];
+      const nextStep = STEPS.find((s) => !completedSteps.includes(s)) ?? null;
+      if (!userId) return nextStep;
+      const next: OnboardingState = { ...state, completedSteps };
       setState(next);
       await persistState(userId, next);
+      return nextStep;
     },
     [state, userId],
   );

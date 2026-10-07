@@ -102,7 +102,7 @@ type PhoenixDetailTab = 'about' | 'sandwiches' | 'holders';
 
 function changeTintColors(value: number | null | undefined): readonly [string, string] {
   if (value == null || value === 0) return ['#9aa3b014', '#9aa3b000'];
-  return value > 0 ? ['#35F04617', '#35F04600'] : ['#EE1E5217', '#EE1E5200'];
+  return value > 0 ? ['#35F04617', '#35F04600'] : ['#FF1AB817', '#FF1AB800'];
 }
 
 /**

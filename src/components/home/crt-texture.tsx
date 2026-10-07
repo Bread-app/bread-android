@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
-import Svg, { Defs, Pattern, Rect } from 'react-native-svg';
+import Svg, { Defs, LinearGradient, Mask, Pattern, Rect, Stop } from 'react-native-svg';
 
 /**
  * Scanline pitch in points. Three is the sweet spot on a 3x screen: it lands on
@@ -17,6 +17,13 @@ type Props = {
    * rendered last.
    */
   id?: string;
+  /** Line colour. Defaults to a faint white, for a dark ground. */
+  color?: string;
+  /**
+   * Full strength at the top, fading to nothing at the bottom — for a wash
+   * over a whole page rather than a bounded board.
+   */
+  fade?: boolean;
 };
 
 /**
@@ -31,7 +38,7 @@ type Props = {
  * load-bearing: a full-bleed overlay would otherwise swallow every tap on the
  * balance, the Add cash button and the tape underneath it.
  */
-export function CrtTexture({ id = 'crt-scanlines' }: Props) {
+export function CrtTexture({ id = 'crt-scanlines', color = LINE, fade = false }: Props) {
   // Measured rather than sized with `100%`. A percentage on the <Svg> resolves
   // against the SVG viewport, not the padded View around it, so the canvas came
   // up short and left the status-bar band at the top of the header unlit.
@@ -60,10 +67,28 @@ export function CrtTexture({ id = 'crt-scanlines' }: Props) {
               height={PITCH}
               patternUnits="userSpaceOnUse"
             >
-              <Rect x={0} y={0} width={PITCH} height={1} fill={LINE} />
+              <Rect x={0} y={0} width={PITCH} height={1} fill={color} />
             </Pattern>
+            {fade ? (
+              <>
+                <LinearGradient id={`${id}-fade`} x1="0" y1="0" x2="0" y2="1">
+                  <Stop offset="0" stopColor="#fff" stopOpacity={1} />
+                  <Stop offset="1" stopColor="#fff" stopOpacity={0} />
+                </LinearGradient>
+                <Mask id={`${id}-mask`}>
+                  <Rect x={0} y={0} width={box.width} height={box.height} fill={`url(#${id}-fade)`} />
+                </Mask>
+              </>
+            ) : null}
           </Defs>
-          <Rect x={0} y={0} width={box.width} height={box.height} fill={`url(#${id})`} />
+          <Rect
+            x={0}
+            y={0}
+            width={box.width}
+            height={box.height}
+            fill={`url(#${id})`}
+            mask={fade ? `url(#${id}-mask)` : undefined}
+          />
         </Svg>
       ) : null}
     </View>

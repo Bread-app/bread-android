@@ -45,7 +45,7 @@ export const HeaderPalette = {
  */
 export const BoardTone = {
   up: '#02ED45',
-  down: '#EE1E52',
+  down: '#FF1AB8',
   flat: '#7F8C88',
 } as const;
 

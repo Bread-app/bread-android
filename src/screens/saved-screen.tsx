@@ -37,6 +37,7 @@ import {
   SandwichShareSheet,
   type SandwichShareSheetRef,
 } from '@/components/sandwich-share-sheet';
+import { LoadErrorState } from '@/components/load-error-state';
 import { PodcastGroupCard, SandwichCard } from '@/components/sandwich-card';
 import type { PodcastGroupVideo } from '@/components/podcast-sandwich-group-card';
 import { usePodcastGroup } from '@/lib/podcast-group-store';
@@ -352,11 +353,7 @@ export function SavedScreen() {
           ) : sandwichesLoading ? (
             <LoadingState />
           ) : sandwiches.length === 0 ? (
-            <EmptyState
-              icon="alert-circle-outline"
-              title="Couldn't load saved sandwiches"
-              subtitle="Pull down to try again."
-            />
+            <LoadErrorState title="Couldn't load saved sandwiches" onRetry={onRefresh} />
           ) : (
             feedItems.map((item) =>
               item.kind === 'video' ? (
@@ -390,11 +387,7 @@ export function SavedScreen() {
         ) : stocksLoading ? (
           <LoadingState />
         ) : stocks.length === 0 ? (
-          <EmptyState
-            icon="alert-circle-outline"
-            title="Couldn't load saved assets"
-            subtitle="Pull down to try again."
-          />
+          <LoadErrorState title="Couldn't load saved assets" onRetry={onRefresh} />
         ) : (
           stocks.map((stock) => (
             <StockCard key={stock.id} stock={stock} onPress={openStock} />

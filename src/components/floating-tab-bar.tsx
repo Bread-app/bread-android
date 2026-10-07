@@ -62,8 +62,9 @@ function TabIcon({ name, color }: { name: string; color: string }) {
  * tab split off to the trailing side, and `NativeTabs` gets all of that from the
  * system. Older iOS has no such bar — it draws the flat, edge-to-edge chrome
  * bar instead — so this redraws the same shape by hand: two rounded capsules
- * over a blur, a soft selection chip behind the active tab, and the same icon
- * set. Not glass, but the same silhouette, so the app reads as one design
+ * over a blur and the same icon set. The active icon changes color without a
+ * selection chip, matching the native bar's indicator-free treatment. Not
+ * glass, but the same silhouette, so the app reads as one design
  * across both.
  *
  * It floats (absolutely positioned, `box-none`) exactly as the real one does,
@@ -90,6 +91,8 @@ export function FloatingTabBar({ state, descriptors, navigation }: BottomTabBarP
   const sheen: [string, string, string] = isDark
     ? ['rgba(255,255,255,0.16)', 'rgba(255,255,255,0.02)', 'rgba(255,255,255,0.07)']
     : ['rgba(255,255,255,0.70)', 'rgba(255,255,255,0.14)', 'rgba(255,255,255,0.40)'];
+  // Android keeps a selection lens: Material users expect an active indicator,
+  // and the lens slides between tabs instead of blinking.
   const selectionColor = isDark ? 'rgba(120,120,128,0.34)' : 'rgba(120,120,128,0.20)';
 
   const routeByName = new Map(state.routes.map((route) => [route.name, route]));

@@ -198,7 +198,7 @@ export function pnlColor(value: number | null, c: ThemeColors) {
 }
 
 
-export const AVATAR_PALETTE = ['#35F046', '#1D4ED8', '#EE1E52', '#F59E0B', '#8B5CF6', '#06B6D4'];
+export const AVATAR_PALETTE = ['#35F046', '#1D4ED8', '#FF1AB8', '#F59E0B', '#8B5CF6', '#06B6D4'];
 export function getAvatarColor(seed: string): string {
   let hash = 0;
   for (let i = 0; i < seed.length; i++) {
@@ -247,11 +247,9 @@ export function getBuilderTake(sandwich: Sandwich) {
  * The cited post's own words — the same field order `XPostPreview` reads, so
  * the feed and the embed can never disagree about what the post said.
  *
- * Used only when the source account IS the card's identity (no builder). There
- * the generated thesis was showing under someone else's name and handle, which
- * put words in their mouth; and the real post was then repeated underneath in a
- * nested embed carrying the same avatar and handle a second time. The post is
- * the card.
+ * Used whenever an X source is the card's primary identity. The original words
+ * lead even when a Bread creator is credited beneath the source account;
+ * generated commentary must not replace what the person actually posted.
  */
 export function getSourcePostText(sandwich: Sandwich) {
   const source = sandwich.source;

@@ -77,7 +77,7 @@ function timeAgo(dateStr: string): string {
   return `${Math.floor(months / 12)}y`;
 }
 
-const AVATAR_PALETTE = ["#35F046", "#1D4ED8", "#EE1E52", "#F59E0B", "#8B5CF6", "#06B6D4"];
+const AVATAR_PALETTE = ["#35F046", "#1D4ED8", "#FF1AB8", "#F59E0B", "#8B5CF6", "#06B6D4"];
 function getAvatarColor(seed: string): string {
   let hash = 0;
   for (let i = 0; i < seed.length; i++) hash = seed.charCodeAt(i) + ((hash << 5) - hash);

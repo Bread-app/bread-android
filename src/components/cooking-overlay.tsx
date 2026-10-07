@@ -2,7 +2,7 @@ import Ionicons from "@expo/vector-icons/Ionicons";
 import * as Haptics from "expo-haptics";
 import LottieView from "lottie-react-native";
 import React, { useEffect, useState } from "react";
-import { Image, StyleSheet, Text, View } from "react-native";
+import { StyleSheet, Text, View } from "react-native";
 import Animated, {
   Easing,
   useAnimatedStyle,
@@ -49,8 +49,8 @@ export function CookingOverlay({
   onBack: () => void;
 }): React.ReactElement | null {
   const insets = useSafeAreaInsets();
-  // A missing or unparseable animation must not take the whole loading state
-  // down with it; the static loaf is the same idea, standing still.
+  // A missing or unparseable animation falls back to a neutral skeleton. The
+  // loading state never depends on decorative artwork.
   const [lottieFailed, setLottieFailed] = useState(false);
 
   if (!visible) return null;
@@ -68,11 +68,14 @@ export function CookingOverlay({
       </PressableScale>
 
       {lottieFailed ? (
-        <Image
-          source={require("../../assets/images/sandwich-loading.png")}
-          style={styles.art}
-          resizeMode="contain"
-        />
+        <View accessible={false} style={styles.loadingSkeleton}>
+          <View style={styles.loadingSkeletonAvatar} />
+          <View style={styles.loadingSkeletonCopy}>
+            <View style={styles.loadingSkeletonLineLong} />
+            <View style={styles.loadingSkeletonLineMedium} />
+            <View style={styles.loadingSkeletonLineShort} />
+          </View>
+        </View>
       ) : (
         <LottieView
           source={require("../../assets/animations/cooking.json")}
@@ -111,6 +114,44 @@ const styles = StyleSheet.create({
   art: {
     width: 180,
     height: 180,
+  },
+  loadingSkeleton: {
+    width: 260,
+    minHeight: 150,
+    flexDirection: "row",
+    gap: 14,
+    padding: 20,
+    borderRadius: 24,
+    backgroundColor: "rgba(0,0,0,0.03)",
+  },
+  loadingSkeletonAvatar: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    backgroundColor: "rgba(0,0,0,0.10)",
+  },
+  loadingSkeletonCopy: {
+    flex: 1,
+    gap: 12,
+    paddingTop: 4,
+  },
+  loadingSkeletonLineLong: {
+    width: "94%",
+    height: 14,
+    borderRadius: 7,
+    backgroundColor: "rgba(0,0,0,0.10)",
+  },
+  loadingSkeletonLineMedium: {
+    width: "76%",
+    height: 14,
+    borderRadius: 7,
+    backgroundColor: "rgba(0,0,0,0.10)",
+  },
+  loadingSkeletonLineShort: {
+    width: "48%",
+    height: 14,
+    borderRadius: 7,
+    backgroundColor: "rgba(0,0,0,0.10)",
   },
   stage: {
     marginTop: 20,

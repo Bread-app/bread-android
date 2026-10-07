@@ -125,7 +125,7 @@ const palettesByTone: Record<
   },
   error: {
     icon: 'alert-circle',
-    iconBg: 'rgba(238, 30, 82,0.1)',
+    iconBg: 'rgba(255,26,184,0.1)',
   },
   info: {
     icon: 'information-circle',
@@ -136,7 +136,7 @@ const palettesByTone: Record<
 const ICON_COLORS: Record<ToastTone, string> = {
   processing: '#38BDF8',
   success: '#35F046',
-  error: '#EE1E52',
+  error: '#FF1AB8',
   info: '#38BDF8',
 };
 

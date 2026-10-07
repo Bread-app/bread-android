@@ -103,9 +103,12 @@ export function WalletScreen() {
         </View>
 
         {hasWallet ? (
-        <WalletActionRow onAddCash={openDeposit} onWithdraw={openWithdraw} />
+          <View style={styles.actionSlot}>
+            <WalletActionRow onAddCash={openDeposit} onWithdraw={openWithdraw} />
+          </View>
         ) : null}
 
+        <Text style={styles.sectionLabel}>Automations</Text>
         <LikeToBuyCard style={styles.likeToBuyCard} onPress={openLikeToBuy} />
       </ScrollView>
 
@@ -114,6 +117,8 @@ export function WalletScreen() {
   );
 }
 
+const GUTTER = 20;
+
 const makeStyles = (c: ThemeColors) =>
   StyleSheet.create({
     page: {
@@ -121,7 +126,8 @@ const makeStyles = (c: ThemeColors) =>
       backgroundColor: c.background,
     },
     content: {
-      paddingHorizontal: 24,
+      paddingHorizontal: GUTTER,
+      paddingTop: 4,
       paddingBottom: 160,
     },
     title: {
@@ -131,22 +137,28 @@ const makeStyles = (c: ThemeColors) =>
       fontFamily: F,
       letterSpacing: -0.5,
       marginTop: 12,
-      marginBottom: 16,
-      paddingHorizontal: 24,
+      marginBottom: 12,
+      paddingHorizontal: GUTTER,
     },
     cardSlot: {
-      marginBottom: 16,
+      marginBottom: 20,
     },
-    actionRow: {
-      alignSelf: "stretch",
-      height: 54,
+    actionSlot: {
+      marginBottom: 32,
     },
-    actionHost: {
-      width: "100%",
-      height: 54,
+    sectionLabel: {
+      color: c.textTertiary,
+      fontSize: 13,
+      fontWeight: "800",
+      fontFamily: F,
+      letterSpacing: 0.6,
+      textTransform: "uppercase",
+      marginBottom: 10,
+      paddingHorizontal: 4,
     },
+    // The card insets itself for other hosts; here it lines up with the
+    // balance card and buttons above it.
     likeToBuyCard: {
-      marginTop: 20,
-      marginBottom: 8,
+      marginHorizontal: 0,
     },
   });

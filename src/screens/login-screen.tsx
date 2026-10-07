@@ -63,7 +63,7 @@ function oauthErrorMessage(provider: 'google', error: unknown): string {
   return `Could not sign in with ${providerName}. Please try again.`;
 }
 
-function AtmosphericBackground() {
+export function AtmosphericBackground() {
   return (
     <View pointerEvents="none" style={backgroundStyles.container}>
       <LinearGradient

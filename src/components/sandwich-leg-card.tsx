@@ -46,9 +46,7 @@ type SandwichLegCardProps = {
   detailsStyle?: StyleProp<ViewStyle>;
 };
 
-/** Stagger: the role lands just before the supporting explanation. */
-const ROLE_DELAY_MS = 120;
-const MECHANISM_DELAY_MS = 180;
+const MECHANISM_DELAY_MS = 120;
 
 function formatPnl(value: number | null) {
   if (value === null) return '--';
@@ -126,15 +124,6 @@ export function SandwichLegCard({
       </View>
 
       <Animated.View style={[styles.details, detailsStyle]}>
-        {leg.legRole ? (
-          <Animated.Text
-            entering={FadeIn.delay(ROLE_DELAY_MS).reduceMotion(ReduceMotion.System)}
-            style={styles.role}
-          >
-            {leg.legRole.toUpperCase()}
-          </Animated.Text>
-        ) : null}
-
         <Animated.Text
           entering={FadeIn.delay(MECHANISM_DELAY_MS).reduceMotion(ReduceMotion.System)}
           style={styles.mechanism}
@@ -220,20 +209,11 @@ const makeStyles = (c: ThemeColors) =>
       fontWeight: '700',
       color: c.textSecondary,
     },
-    role: {
-      fontFamily: F,
-      fontSize: 12,
-      fontWeight: '800',
-      letterSpacing: 1.1,
-      color: c.textSecondary,
-    },
     mechanism: {
       fontFamily: Fonts.poppins,
       fontSize: 15,
       lineHeight: 22,
       color: c.text,
-      // Pull the body up under the role label when both are present.
-      marginTop: -6,
     },
     details: {
       gap: 14,

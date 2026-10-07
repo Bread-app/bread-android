@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { LoadErrorState } from '@/components/load-error-state';
 import { AssetLogo } from '@/components/asset-logo';
 import { Fonts, type ThemeColors } from '@/constants/theme';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
@@ -155,21 +156,12 @@ export function ActivityScreen() {
             }}
           />
         }>
-        {error ? (
-          <View style={styles.errorBanner}>
-            <Ionicons name="cloud-offline-outline" size={20} color={colors.negative} />
-            <Text style={styles.errorText}>{error}</Text>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Retry loading activity"
-              onPress={() => void loadActivity()}
-              style={({ pressed }) => [styles.retryButton, pressed && styles.retryButtonPressed]}>
-              <Text style={styles.retryText}>Retry</Text>
-            </Pressable>
-          </View>
-        ) : null}
 
-        {initialLoading ? (
+        {/* Nothing to show and the load failed: just the message, centred.
+            A failed refresh over loaded rows keeps the rows. */}
+        {error && (initialLoading || items.length === 0) ? (
+          <LoadErrorState title="Couldn't load activity" onRetry={() => void loadActivity()} />
+        ) : initialLoading ? (
           <View accessibilityLabel="Loading activity" style={styles.listCard}>
             {Array.from({ length: 6 }, (_, index) => (
               <View

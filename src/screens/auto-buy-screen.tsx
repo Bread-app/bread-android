@@ -3,7 +3,6 @@ import MaskedView from "@react-native-masked-view/masked-view";
 import * as Haptics from "expo-haptics";
 import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
-import * as WebBrowser from "expo-web-browser";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -35,15 +34,14 @@ import { WithdrawSheet, type WithdrawSheetRef } from "@/components/withdraw-shee
 import { HandleText } from "@/components/handle-text";
 import { useCash } from "@/hooks/use-cash";
 import { useWalletStore } from "@/lib/wallet-store";
+import { linkXAccount } from "@/lib/x-link";
 import {
-  completeXOauth2,
   disconnectX,
   getAutoBuyConfig,
   getXConnection,
   humanizeErrorMessage,
   registerAutoBuyDelegation,
   revokeAutoBuyDelegation,
-  startXOauth2,
   updateAutoBuyConfig,
   type AutoBuyConfig,
   type XConnectionStatus,
@@ -260,18 +258,8 @@ export function AutoBuyScreen({ showBackButton = true }: { showBackButton?: bool
     setBusy("x");
     setError(null);
     try {
-      const { authorizeUrl, callbackUrl } = await startXOauth2();
-      const result = await WebBrowser.openAuthSessionAsync(authorizeUrl, callbackUrl);
-      if (result.type !== "success" || !result.url) return; // user dismissed
-
-      const returned = new URL(result.url);
-      const code = returned.searchParams.get("code");
-      const state = returned.searchParams.get("state");
-      if (returned.searchParams.get("error") || !code || !state) {
-        throw new Error("X authorization didn't complete. Please try again.");
-      }
-
-      const outcome = await completeXOauth2({ code, state });
+      const outcome = await linkXAccount();
+      if (!outcome) return; // user dismissed
       if (!outcome.likesSubscribed) {
         // A connection without a live subscription buys nothing — say so
         // instead of showing a green "Connected" that silently does nothing.
@@ -974,7 +962,7 @@ const makeStyles = (c: ThemeColors) =>
     error: {
       fontFamily: F, fontWeight: "400",
       fontSize: 13,
-      color: "#D3484F",
+      color: c.negative,
       paddingHorizontal: 4,
     },
     disclosure: {

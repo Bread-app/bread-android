@@ -55,6 +55,8 @@ import Animated, {
 import Svg, { Path } from "react-native-svg";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import { Host, Slider } from "@expo/ui/swift-ui";
+import { LegTapHint } from "@/components/leg-tap-hint";
+import { LoadErrorState } from "@/components/load-error-state";
 import { ShareIcon } from "@/components/share-icon";
 import { RemixIcon } from "@/components/remix-icon";
 import {
@@ -71,6 +73,7 @@ import { FollowButton } from "@/components/follow-button";
 import { AssetLogo as RemoteAssetLogo } from "@/components/asset-logo";
 import { PressableScale } from "@/components/pressable-scale";
 import { NewsFeed } from "@/components/news/news-feed";
+import { markLegTapHintSeen, shouldShowLegTapHint } from "@/lib/leg-tap-hint";
 import { buildNewsStories, setActiveNewsStory, type NewsStory } from "@/lib/news-feed";
 import { AddThesisButton } from '@/components/add-thesis-button';
 import { PositionTakesSection } from '@/components/position-takes-section';
@@ -82,6 +85,7 @@ import {
 } from "react-native-safe-area-context";
 
 import { SandwichResearchCard } from "@/components/sandwich-research-card";
+import { RecommendedSandwiches } from "@/components/recommended-sandwiches";
 import { Fonts, Motion, type ThemeColors } from "@/constants/theme";
 import { withAlpha } from "@/lib/color-utils";
 import { formatSandwichDetailDateTime } from "@/lib/sandwich-detail-date";
@@ -426,27 +430,35 @@ const FEED_PAGE_SIZE = 20;
 
 function SandwichLoadingScreen() {
   const styles = useThemedStyles(makeStyles);
-  const { height } = useWindowDimensions();
-  const { colors } = useThemeStore();
 
   return (
     <View
       accessibilityRole="progressbar"
-      accessibilityLabel="Loading Sandwiches"
-      style={[styles.sandwichLoadingScreen, { minHeight: Math.max(480, height - 190) }]}
+      accessibilityLabel="Loading posts"
+      style={styles.sandwichLoadingScreen}
     >
-      <View style={styles.sandwichLoadingArtFrame}>
-        <Image
-          accessible={false}
-          resizeMode="contain"
-          source={require("../../assets/images/sandwich-loading.png")}
-          style={styles.sandwichLoadingArt}
-        />
-      </View>
-      <View style={styles.sandwichLoadingStatus}>
-        <ActivityIndicator color={colors.actionPrimary} size="small" />
-        <Text style={styles.sandwichLoadingText}>Making sandwiches…</Text>
-      </View>
+      {[0, 1, 2].map((index) => (
+        <View key={index} style={styles.sandwichSkeletonCard}>
+          <View style={styles.sandwichSkeletonAvatar} />
+          <View style={styles.sandwichSkeletonContent}>
+            <View style={styles.sandwichSkeletonByline}>
+              <View style={styles.sandwichSkeletonHandle} />
+              <View style={styles.sandwichSkeletonTime} />
+            </View>
+            <View style={styles.sandwichSkeletonBodyLong} />
+            <View style={styles.sandwichSkeletonBodyMedium} />
+            {index !== 1 ? <View style={styles.sandwichSkeletonBodyShort} /> : null}
+            <View style={styles.sandwichSkeletonActions}>
+              <View style={styles.sandwichSkeletonActionGroup}>
+                <View style={styles.sandwichSkeletonAction} />
+                <View style={styles.sandwichSkeletonAction} />
+                <View style={styles.sandwichSkeletonAction} />
+              </View>
+              <View style={styles.sandwichSkeletonPill} />
+            </View>
+          </View>
+        </View>
+      ))}
     </View>
   );
 }
@@ -3308,7 +3320,7 @@ function getSideMeta(leg: SandwichLeg) {
     : isShortOrNo ? "SHORT" : "LONG";
   const color = isMarket
     ? isShortOrNo ? "#7d3ad6" : "#1d6cd6"
-    : isShortOrNo ? "#c43d3d" : "#1f9d6b";
+    : isShortOrNo ? "#FF1AB8" : "#1f9d6b";
   return { label, color };
 }
 
@@ -3696,8 +3708,8 @@ function MiniSparkline({ seed, up }: { seed: string; up: boolean }) {
     return { line: linePath, area: areaPath };
   }, [seed, up]);
 
-  const stroke = up ? "#22C55E" : "#EF4444";
-  const fill = up ? "rgba(34,197,94,0.12)" : "rgba(239,68,68,0.12)";
+  const stroke = up ? "#22C55E" : "#FF33C9";
+  const fill = up ? "rgba(34,197,94,0.12)" : "rgba(255,51,201,0.12)";
 
   return (
     <Svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none">
@@ -4157,28 +4169,37 @@ function PerpGridCard({
   );
 }
 // Timeframe pills under the detail chart. Order = shortest → longest lookback.
-const CHART_RANGE_PILLS: { label: string; range: SandwichChartRange }[] = [
-  { label: "24H", range: "24H" },
-  { label: "1W", range: "1W" },
-  { label: "1M", range: "1M" },
-  { label: "3M", range: "3M" },
-  { label: "ALL", range: "ALL" },
+const CHART_RANGE_PILLS: { label: string; range: SandwichChartRange; seconds: number }[] = [
+  { label: "24H", range: "24H", seconds: 24 * 60 * 60 },
+  { label: "1W", range: "1W", seconds: 7 * 24 * 60 * 60 },
+  { label: "1M", range: "1M", seconds: 30 * 24 * 60 * 60 },
+  { label: "3M", range: "3M", seconds: 90 * 24 * 60 * 60 },
+  { label: "ALL", range: "ALL", seconds: Number.POSITIVE_INFINITY },
 ];
-// Default the chart to the shortest pill that still covers the whole life of the
-// thesis, so the curve on open spans exactly the period the headline PnL is
-// measured over. Older sandwiches land on ALL rather than being capped at 3M:
-// capping meant a >3-month-old thesis opened on a window that could be up while
-// its since-creation PnL was down — a green line under a red number. The pills
-// then let the viewer zoom into a more recent window (which reports its own
-// return to the headline; see the chart's `isWindowedView`).
-function defaultChartRange(createdAt: string | null): SandwichChartRange {
-  if (!createdAt) return "1W";
-  const ageSeconds = (Date.now() - new Date(createdAt).getTime()) / 1000;
-  if (!Number.isFinite(ageSeconds)) return "1W";
-  if (ageSeconds <= 24 * 60 * 60) return "24H";
-  if (ageSeconds <= 7 * 24 * 60 * 60) return "1W";
-  if (ageSeconds <= 30 * 24 * 60 * 60) return "1M";
-  if (ageSeconds <= 90 * 24 * 60 * 60) return "3M";
+
+function sandwichAgeSeconds(createdAt: string | null): number | null {
+  if (!createdAt) return null;
+  const age = (Date.now() - new Date(createdAt).getTime()) / 1000;
+  return Number.isFinite(age) ? age : null;
+}
+
+/**
+ * The pills a sandwich offers depend on how long it has been live: only windows
+ * shorter than its life, plus ALL (since it was posted). A two-day-old sandwich
+ * gets 24H and ALL; a two-month-old one 24H, 1W, 1M and ALL. A window longer
+ * than the sandwich's life would just be ALL again under another name.
+ */
+function chartRangePills(createdAt: string | null) {
+  const age = sandwichAgeSeconds(createdAt);
+  if (age === null) return CHART_RANGE_PILLS;
+  return CHART_RANGE_PILLS.filter((pill) => pill.range === "ALL" || pill.seconds < age);
+}
+
+// Open on ALL — the whole life of the thesis — so the curve on open spans exactly
+// the period the headline "since posted" PnL is measured over. The pills then let
+// the viewer zoom into a more recent window (which reports its own return to the
+// headline; see the chart's `isWindowedView`).
+function defaultChartRange(): SandwichChartRange {
   return "ALL";
 }
 // Lines the hero thesis quote shows before it collapses behind a "more" toggle.
@@ -4964,7 +4985,7 @@ export function SandwichDetailScreen() {
   const [showStickyHeader, setShowStickyHeader] = useState(false);
   const [creatorProfileOpen, setCreatorProfileOpen] = useState(false);
   const [chartRange, setChartRange] = useState<SandwichChartRange>(() =>
-    defaultChartRange(sandwich?.createdAt ?? null),
+    defaultChartRange(),
   );
   // Open progress of the buy pad, owned here (not by the overlay) because the
   // detail page recedes behind it — see `sandwichContentStyle`.
@@ -5512,6 +5533,29 @@ export function SandwichDetailScreen() {
       screenH,
     ],
   );
+  // New users get a looping tap cue on the first asset row until they open an
+  // asset once (forced on for everyone by EXPO_PUBLIC_FORCE_LEG_TAP_HINT).
+  const [showLegTapHint, setShowLegTapHint] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    setShowLegTapHint(false);
+    void shouldShowLegTapHint(appUser?.privyUserId ?? null).then((shouldShow) => {
+      if (!cancelled) setShowLegTapHint(shouldShow);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [appUser?.privyUserId, sandwich?.id]);
+  const handleLegPress = useCallback(
+    (leg: SandwichLeg, origin: LegCardOrigin) => {
+      if (showLegTapHint) {
+        setShowLegTapHint(false);
+        void markLegTapHintSeen(appUser?.privyUserId ?? null).catch(() => {});
+      }
+      openLegCard(leg, origin);
+    },
+    [appUser?.privyUserId, openLegCard, showLegTapHint],
+  );
 
   // Drag the opened card down to shrink it back into its row.
   const legPan = useMemo(
@@ -5612,7 +5656,7 @@ export function SandwichDetailScreen() {
     setHeroThesisLineCount(null);
     chartReturnActive.value = 0;
     setShowStickyHeader(false);
-    setChartRange(defaultChartRange(sandwich?.createdAt ?? null));
+    setChartRange(defaultChartRange());
   }, [
     sandwich?.id,
     sandwich?.pnlPct,
@@ -5637,6 +5681,11 @@ export function SandwichDetailScreen() {
     return `${value >= 0 ? "+" : ""}${value.toFixed(2)}%`;
   });
 
+
+  const rangePills = useMemo(
+    () => chartRangePills(sandwich?.createdAt ?? null),
+    [sandwich?.createdAt],
+  );
   const detailPnlColor = useDerivedValue(() => {
     const value = chartReturnActive.value > 0 ? chartReturnPct.value : restPnlPct.value;
     if (Number.isNaN(value) || value === 0) return colors.text;
@@ -6007,23 +6056,6 @@ export function SandwichDetailScreen() {
                       </View>
                     ) : null}
 
-                  {/* Meta: PnL % pushed right. */}
-                    <View style={styles.detailMetaRow}>
-                      <View style={{ flex: 1 }} />
-                      {/* A perp sandwich's percentage is the move in the
-                          UNDERLYING — no leverage, no funding — because that is
-                          the only figure available without an open position. Say
-                          which one this is rather than letting it read as the
-                          realized return. */}
-                      {sandwich.pnlBasis === "underlying_move" ? (
-                        <Text style={styles.detailMetaPnlBasis}>underlying</Text>
-                      ) : null}
-                      <AnimatedScrubText
-                        text={detailPnlText}
-                        color={detailPnlColor}
-                        style={styles.detailMetaPnl}
-                      />
-                    </View>
                     </View>
                   </ScaledSandwichSection>
 
@@ -6047,35 +6079,38 @@ export function SandwichDetailScreen() {
                           scrubValue={chartReturnPct}
                           scrubValueActive={chartReturnActive}
                         />
-                        <View style={styles.chartRangeRow}>
-                          {CHART_RANGE_PILLS.map(({ label, range }) => {
-                            const active = chartRange === range;
-                            return (
-                              <Pressable
-                                key={range}
-                                accessibilityRole="button"
-                                accessibilityState={{ selected: active }}
-                                accessibilityLabel={`Show ${label} chart`}
-                                hitSlop={8}
-                                onPress={() => {
-                                  if (active) return;
-                                  void Haptics.selectionAsync();
-                                  setChartRange(range);
-                                }}
-                                style={styles.chartRangePill}
-                              >
-                                <Text
-                                  style={[
-                                    styles.chartRangePillText,
-                                    active && styles.chartRangePillTextActive,
-                                  ]}
+                        {/* Under a day old there's only ALL, so no row at all. */}
+                        {rangePills.length > 1 ? (
+                          <View style={styles.chartRangeRow}>
+                            {rangePills.map(({ label, range }) => {
+                              const active = chartRange === range;
+                              return (
+                                <Pressable
+                                  key={range}
+                                  accessibilityRole="button"
+                                  accessibilityState={{ selected: active }}
+                                  accessibilityLabel={`Show ${label} chart`}
+                                  hitSlop={8}
+                                  onPress={() => {
+                                    if (active) return;
+                                    void Haptics.selectionAsync();
+                                    setChartRange(range);
+                                  }}
+                                  style={styles.chartRangePill}
                                 >
-                                  {label}
-                                </Text>
-                              </Pressable>
-                            );
-                          })}
-                        </View>
+                                  <Text
+                                    style={[
+                                      styles.chartRangePillText,
+                                      active && styles.chartRangePillTextActive,
+                                    ]}
+                                  >
+                                    {label}
+                                  </Text>
+                                </Pressable>
+                              );
+                            })}
+                          </View>
+                        ) : null}
                       </View>
                     </ScaledSandwichSection>
                   ) : null}
@@ -6105,13 +6140,47 @@ export function SandwichDetailScreen() {
 
                   {/* Flat legs list */}
                   <ScaledSandwichSection scale={elementScales.assetRows}>
+                    {/* A single-asset sandwich has nothing to split, and its one row
+                        already shows the same return — so no header then. */}
+                    {sortedLegs.length > 1 ? (
+                      <>
+                        {/* The basket's return — scrubbed by the chart above — right
+                            above the legs it is made of. */}
+                        <View style={styles.detailMetaRow}>
+                          <View style={styles.detailMetaLabel}>
+                            {/* Heads the asset list below: how the basket is split. */}
+                            <Text
+                              accessibilityLabel={`Split across ${sortedLegs.length} ${sortedLegs.length === 1 ? "asset" : "assets"}`}
+                              numberOfLines={1}
+                              style={styles.detailMetaLabelText}
+                            >
+                              Split{" "}
+                              <Text style={styles.detailMetaLabelCount}>{`(${sortedLegs.length})`}</Text>
+                            </Text>
+                          </View>
+                          {/* A perp sandwich's percentage is the move in the
+                              UNDERLYING — no leverage, no funding — because that is
+                              the only figure available without an open position. Say
+                              which one this is rather than letting it read as the
+                              realized return. */}
+                          {sandwich.pnlBasis === "underlying_move" ? (
+                            <Text style={styles.detailMetaPnlBasis}>underlying</Text>
+                          ) : null}
+                          <AnimatedScrubText
+                            text={detailPnlText}
+                            color={detailPnlColor}
+                            style={styles.detailMetaPnl}
+                          />
+                        </View>
+                      </>
+                    ) : null}
                     <View style={styles.detailLegsSection}>
                       {sortedLegs.map((leg, index) => (
+                        <View key={leg.id}>
                         <SandwichLegRow
-                          key={leg.id}
                           leg={leg}
                           isLast={index === sortedLegs.length - 1}
-                          onPress={openLegCard}
+                          onPress={handleLegPress}
                           isCardOpen={legCardLeg?.id === leg.id}
                           rowVisible={legRowVisible}
                           priceScale={elementScales.assetPrices}
@@ -6124,6 +6193,10 @@ export function SandwichDetailScreen() {
                               : undefined
                           }
                         />
+                        {index === 0 && showLegTapHint && legCardLeg === null ? (
+                          <LegTapHint />
+                        ) : null}
+                        </View>
                       ))}
                     </View>
                   </ScaledSandwichSection>
@@ -6173,6 +6246,12 @@ export function SandwichDetailScreen() {
                           </View>
                         </View>
                       ) : null}
+                      {sandwich ? (
+                        <RecommendedSandwiches
+                          sandwich={sandwich}
+                          onOpen={(next, options) => openSandwichDetail(next, options)}
+                        />
+                      ) : null}
                       <Pressable
                         accessibilityRole="button"
                         accessibilityLabel={thesisExpanded ? "Show less" : "Show more"}
@@ -6183,7 +6262,7 @@ export function SandwichDetailScreen() {
                         ]}
                       >
                         <Text style={styles.showMoreText}>
-                          {thesisExpanded ? "Show Less" : "Show More"}
+                          {thesisExpanded ? "show less" : "show more"}
                         </Text>
                         <Ionicons
                           name={thesisExpanded ? "chevron-up" : "chevron-down"}
@@ -6192,6 +6271,15 @@ export function SandwichDetailScreen() {
                         />
                       </Pressable>
                       </View>
+                    </ScaledSandwichSection>
+                  ) : sandwich ? (
+                    // No thesis to expand, so no Show More — the row still
+                    // sits in the same spot, right under the legs.
+                    <ScaledSandwichSection scale={elementScales.details}>
+                      <RecommendedSandwiches
+                        sandwich={sandwich}
+                        onOpen={(next, options) => openSandwichDetail(next, options)}
+                      />
                     </ScaledSandwichSection>
                   ) : null}
 
@@ -6879,6 +6967,7 @@ export function SandwichScreen() {
           onComment={onCommentSandwich}
           onShare={handleShareSandwich}
           showRemix={false}
+          layout="holding"
         />
       ),
     [
@@ -6907,11 +6996,13 @@ export function SandwichScreen() {
           <DailyPromptCard prompt={dailyPrompt} onPress={openPromptComposer} />
         ) : null}
 
-        {errorMessage ? (
-          <View style={styles.stateCard}>
-            <Text style={styles.stateTitle}>Could not load Sandwiches</Text>
-            <Text style={styles.stateBody}>{errorMessage}</Text>
-          </View>
+        {/* Only when there's nothing to show — a failed refresh over a loaded
+            feed keeps the feed on screen. */}
+        {errorMessage && feedItems.length === 0 && !loading ? (
+          <LoadErrorState
+            title="Couldn't load sandwiches"
+            onRetry={() => void loadSandwiches(true)}
+          />
         ) : null}
 
         {loading ? <SandwichLoadingScreen /> : null}
@@ -6924,7 +7015,7 @@ export function SandwichScreen() {
         ) : null}
       </>
     ),
-    [dailyPrompt, empty, errorMessage, loading, openPromptComposer, styles],
+    [dailyPrompt, empty, errorMessage, feedItems.length, loadSandwiches, loading, openPromptComposer, styles],
   );
 
   const feedFooter = useMemo(
@@ -7164,6 +7255,22 @@ export function SandwichScreen() {
                 >
                   <FilterLabel label="News" active={activeTab === 'news'} />
                 </Pressable>
+                {/* Clips: video sandwiches, one call per screen. */}
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Video clips"
+                  hitSlop={10}
+                  onPress={() => {
+                    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                    expoRouter.push("/reels");
+                  }}
+                  style={({ pressed }) => [
+                    styles.reelsButton,
+                    pressed && styles.tabHeaderBtnPressed,
+                  ]}
+                >
+                  <Ionicons name="play-circle" size={28} color={colors.text} />
+                </Pressable>
               </View>
             )}
             {/* Inside the header, not the list: the fade overlaps the feed's
@@ -7313,6 +7420,9 @@ export function SandwichScreen() {
         onPress={openComposer}
         style={[
           styles.composeFab,
+          // A soft glow in the button's own blue, all round rather than
+          // dropped, so it reads as light and not as a shadow.
+          { backgroundColor: colors.actionPrimary, shadowColor: colors.actionPrimary },
           { bottom: composeFabBottom, right: 16 + Math.max(insets.right, 0) },
         ]}
       >
@@ -7519,6 +7629,15 @@ const makeStyles = (c: ThemeColors) => {
     justifyContent: "flex-end",
     paddingBottom: 2,
   },
+  reelsButton: {
+    position: "absolute",
+    right: 18,
+    bottom: 12,
+    width: 36,
+    height: 36,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   tabHeaderBtnPressed: {
     // Emil's canonical scale-on-press value — subtle but felt.
     transform: [{ scale: 0.97 }],
@@ -7569,6 +7688,10 @@ const makeStyles = (c: ThemeColors) => {
     width: 64,
     height: 64,
     borderRadius: 32,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.7,
+    shadowRadius: 18,
+    elevation: 12,
   },
   composeFabGradient: {
     width: 64,
@@ -7629,13 +7752,13 @@ const makeStyles = (c: ThemeColors) => {
     justifyContent: "center",
   },
   composerNavCancelText: {
-    color: ink("#FF3B30", "#ff6b61"),
+    color: ink("#FF1AB8", "#FF33C9"),
     fontSize: 16,
     fontWeight: "700",
     fontFamily: F,
   },
   newPostCancelText: {
-    color: "rgba(255,59,48,0.4)",
+    color: "rgba(255,26,184,0.4)",
     fontSize: 16,
     fontWeight: "700",
     fontFamily: F,
@@ -8315,7 +8438,7 @@ const makeStyles = (c: ThemeColors) => {
     color: ink("#16A34A", "#4ade80"),
   },
   stockChangeDown: {
-    color: ink("#EF4444", "#f87171"),
+    color: ink("#FF1AB8", "#FF33C9"),
   },
   comingSoonWrap: {
     paddingTop: 56,
@@ -8456,13 +8579,13 @@ const makeStyles = (c: ThemeColors) => {
     fontFamily: F,
   },
   legConfigRemove: {
-    backgroundColor: wash("#FF3B30", "#FDECEC"),
+    backgroundColor: wash("#FF1AB8", "#FFF0F8"),
     paddingHorizontal: 16,
     paddingVertical: 10,
     borderRadius: 20,
   },
   legConfigRemoveText: {
-    color: ink("#FF3B30", "#ff6b61"),
+    color: ink("#FF1AB8", "#FF33C9"),
     fontSize: 14,
     fontWeight: "800",
     fontFamily: F,
@@ -8872,7 +8995,12 @@ const makeStyles = (c: ThemeColors) => {
     paddingHorizontal: 7,
     paddingVertical: 4,
     borderRadius: 999,
-    backgroundColor: withAlpha(c.surfaceAlt, 0.68),
+    backgroundColor: c.background,
+    shadowColor: c.shadow,
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: isDark ? 0.34 : 0.13,
+    shadowRadius: 8,
+    elevation: 3,
     // Pushed to the trailing edge without a flex spacer — a spacer would have
     // eaten a row gap on each side of itself.
     marginLeft: "auto",
@@ -9626,38 +9754,87 @@ const makeStyles = (c: ThemeColors) => {
     fontFamily: F,
   },
   sandwichLoadingScreen: {
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 18,
-    paddingHorizontal: 24,
-    paddingBottom: 36,
-  },
-  sandwichLoadingArtFrame: {
-    width: "82%",
-    maxWidth: 300,
-    aspectRatio: 996 / 1320,
-    borderRadius: 26,
-    overflow: "hidden",
-    // The supplied watercolor artwork is composed for a white paper matte.
-    backgroundColor: "#FFFFFF",
-  },
-  sandwichLoadingArt: {
     width: "100%",
-    height: "100%",
+    paddingTop: 6,
   },
-  sandwichLoadingStatus: {
-    minHeight: 40,
+  sandwichSkeletonCard: {
+    flexDirection: "row",
+    gap: 12,
+    paddingHorizontal: 2,
+    paddingTop: 16,
+    paddingBottom: 12,
+  },
+  sandwichSkeletonAvatar: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: c.surfaceAlt,
+  },
+  sandwichSkeletonContent: {
+    flex: 1,
+    gap: 10,
+    paddingTop: 2,
+  },
+  sandwichSkeletonByline: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "center",
-    gap: 10,
+    justifyContent: "space-between",
   },
-  sandwichLoadingText: {
-    color: c.text,
-    fontSize: 16,
-    lineHeight: 20,
-    fontWeight: "800",
-    fontFamily: F,
+  sandwichSkeletonHandle: {
+    width: "42%",
+    height: 14,
+    borderRadius: 7,
+    backgroundColor: c.surfaceAlt,
+  },
+  sandwichSkeletonTime: {
+    width: 44,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: c.surfaceAlt,
+  },
+  sandwichSkeletonBodyLong: {
+    width: "96%",
+    height: 14,
+    borderRadius: 7,
+    backgroundColor: c.surfaceAlt,
+  },
+  sandwichSkeletonBodyMedium: {
+    width: "78%",
+    height: 14,
+    borderRadius: 7,
+    backgroundColor: c.surfaceAlt,
+  },
+  sandwichSkeletonBodyShort: {
+    width: "54%",
+    height: 14,
+    borderRadius: 7,
+    backgroundColor: c.surfaceAlt,
+  },
+  sandwichSkeletonActions: {
+    minHeight: 40,
+    marginTop: 4,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  sandwichSkeletonActionGroup: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingRight: 34,
+  },
+  sandwichSkeletonAction: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: c.surfaceAlt,
+  },
+  sandwichSkeletonPill: {
+    width: 104,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: c.surfaceAlt,
   },
   sheetBackground: {
     backgroundColor: c.background,
@@ -9856,6 +10033,23 @@ const makeStyles = (c: ThemeColors) => {
     paddingHorizontal: 10,
     paddingTop: 6,
     paddingBottom: 2,
+  },
+  detailMetaLabel: {
+    flex: 1,
+    minWidth: 0,
+    justifyContent: "center",
+  },
+  // Sized to sit level with the 30pt PnL figure beside it.
+  // SF Pro Rounded (the system rounded face).
+  detailMetaLabelText: {
+    color: c.text,
+    fontSize: 24,
+    fontWeight: "700",
+    fontFamily: F,
+    fontVariant: ["tabular-nums"],
+  },
+  detailMetaLabelCount: {
+    color: c.textTertiary,
   },
   detailMetaPnl: {
     fontSize: 30,
@@ -10158,12 +10352,12 @@ const makeStyles = (c: ThemeColors) => {
     marginTop: 2,
     padding: 12,
     borderRadius: 14,
-    backgroundColor: wash("#a62921", "#fff7f7"),
+    backgroundColor: wash("#FF1AB8", "#FFF0F8"),
     borderWidth: 1,
-    borderColor: ink("#fad4d6", withAlpha("#f28b82", 0.4)),
+    borderColor: ink("#FFD0EF", withAlpha("#FF33C9", 0.4)),
   },
   thesisComposerErrorText: {
-    color: ink("#a62921", "#f28b82"),
+    color: ink("#FF1AB8", "#FF66D4"),
     fontSize: 14,
     lineHeight: 20,
     fontWeight: "700",
@@ -10702,7 +10896,7 @@ const makeStyles = (c: ThemeColors) => {
     backgroundColor: wash("#22C55E", "#E6F9EC"),
   },
   previewLegSideChipShort: {
-    backgroundColor: wash("#DC2626", "#FEE2E2"),
+    backgroundColor: wash("#FF1AB8", "#FFF0F8"),
   },
   previewLegSideLabel: {
     fontSize: 10,
@@ -10714,7 +10908,7 @@ const makeStyles = (c: ThemeColors) => {
     color: ink("#059669", "#4ade80"),
   },
   previewLegSideLabelShort: {
-    color: ink("#DC2626", "#f87171"),
+    color: ink("#FF1AB8", "#FF33C9"),
   },
   previewLegSubtitle: {
     marginTop: 4,
@@ -10746,7 +10940,7 @@ const makeStyles = (c: ThemeColors) => {
     fontWeight: "900",
   },
   composerLegsTotalWarn: {
-    color: ink("#a62921", "#f28b82"),
+    color: ink("#FF1AB8", "#FF66D4"),
   },
   composerLegEmpty: {
     backgroundColor: c.background,
@@ -10836,7 +11030,7 @@ const makeStyles = (c: ThemeColors) => {
     backgroundColor: "#1f9d6b",
   },
   composerSideShort: {
-    backgroundColor: "#c43d3d",
+    backgroundColor: "#FF1AB8",
   },
   composerSideYes: {
     backgroundColor: "#1d6cd6",
@@ -11199,7 +11393,7 @@ const makeStyles = (c: ThemeColors) => {
     borderColor: c.text,
   },
   pickerWeightInputWrapWarn: {
-    borderColor: ink("#fad4d6", withAlpha("#f28b82", 0.4)),
+    borderColor: ink("#FFD0EF", withAlpha("#FF33C9", 0.4)),
   },
   pickerWeightInputBig: {
     color: c.text,
@@ -11220,7 +11414,7 @@ const makeStyles = (c: ThemeColors) => {
   },
   pickerWeightWarn: {
     marginTop: 8,
-    color: ink("#a62921", "#f28b82"),
+    color: ink("#FF1AB8", "#FF66D4"),
     fontSize: 12,
     fontWeight: "700",
     fontFamily: F,

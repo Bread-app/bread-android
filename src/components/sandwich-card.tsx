@@ -11,6 +11,7 @@ import { AssetPriceText } from "@/components/asset-price-text";
 import { HeartToggle, type HeartToggleRef } from "@/components/heart-toggle";
 import { PressableScale } from "@/components/pressable-scale";
 import { RemixIcon } from "@/components/remix-icon";
+import { SandwichAvatarStack } from "@/components/sandwich-avatar-stack";
 import { ShareIcon } from "@/components/share-icon";
 import { VerifiedBadge } from "@/components/verified-badge";
 import { XPostPreview, isXPostSource } from "@/components/x-post-preview";
@@ -48,6 +49,7 @@ import { useOptionalSandwichComposer } from "@/lib/sandwich-composer-store";
 import { useOptionalSandwichDetail } from "@/lib/sandwich-detail-store";
 import { useOptionalSavedStore, useSavedStore } from "@/lib/saved-store";
 import { useThemeStore } from "@/lib/theme-store";
+import { stripHiddenUrls, useTweetMedia, type TweetMedia } from "@/lib/tweet-media";
 import { useToast } from "@/lib/toast-store";
 
 /**
@@ -289,8 +291,8 @@ export function CardAssetIcons({ legs }: { legs: SandwichLeg[] }) {
         >
           <RemoteAssetLogo
             uri={leg.imageUrl}
-            size={22}
-            borderRadius={11}
+            size={24}
+            borderRadius={12}
             backgroundColor={colors.surfaceAlt}
             borderWidth={2}
             borderColor={colors.surfaceAlt}
@@ -313,6 +315,13 @@ export function CardAssetIcons({ legs }: { legs: SandwichLeg[] }) {
     </View>
   );
 }
+
+/** The lead asset's logo on a Home / Explore card, and the basket badges on it. */
+const FEED_FACE_SIZE = 36;
+const FEED_BADGE_SIZE = 16;
+
+/** Asset logo in a leg row. */
+const LEG_LOGO_SIZE = 46;
 
 /** On-screen rect of a leg row, in window coordinates — the seed the detail
  * card grows out of and shrinks back into. */
@@ -400,8 +409,8 @@ export function SandwichLegRow({
       <View style={styles.legImageWrap}>
         <RemoteAssetLogo
           uri={leg.imageUrl}
-          size={46}
-          borderRadius={23}
+          size={LEG_LOGO_SIZE}
+          borderRadius={LEG_LOGO_SIZE / 2}
           backgroundColor={colors.surfaceAlt}
           fallback={
             <View style={styles.legImageFallback}>
@@ -593,6 +602,71 @@ const SAVED_UNAVAILABLE: SandwichCardSavedControls = {
   toggleSave: async () => false,
 };
 
+/** The feed shows no links — they live on the sandwich's detail page. */
+function stripLinks(text: string): string {
+  return text
+    .replace(/\bhttps?:\/\/\S+/gi, "")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/[ \t]{2,}/g, " ")
+    .trim();
+}
+
+/**
+ * A source tweet's photos, drawn under the take and indented past the avatar
+ * like the rest of the copy.
+ */
+function CardTweetMedia({ media }: { media: TweetMedia }) {
+  const styles = useThemedStyles(makeStyles);
+  const { photos } = media;
+
+  if (photos.length === 1) {
+    const [photo] = photos;
+    // Clamped so a tall screenshot can't take over the feed, nor a panorama
+    // shrink to a sliver.
+    const aspectRatio = Math.min(2, Math.max(0.8, photo.width / photo.height));
+    return (
+      <View style={[styles.tweetMedia, { aspectRatio }]}>
+        <Image source={{ uri: photo.url }} style={styles.tweetMediaFill} contentFit="cover" cachePolicy="memory-disk" />
+        {photo.isVideo ? <TweetPlayBadge /> : null}
+      </View>
+    );
+  }
+
+  if (photos.length > 1) {
+    return (
+      <View style={[styles.tweetMedia, styles.tweetMediaGrid]}>
+        {photos.map((photo, index) => (
+          <View
+            key={photo.url}
+            style={[
+              styles.tweetMediaCell,
+              // Two photos sit side by side; of three, the first spans the
+              // left column — both as X lays them out.
+              (photos.length === 2 || (photos.length === 3 && index === 0)) &&
+                styles.tweetMediaCellTall,
+            ]}
+          >
+            <Image source={{ uri: photo.url }} style={styles.tweetMediaFill} contentFit="cover" cachePolicy="memory-disk" />
+            {photo.isVideo ? <TweetPlayBadge /> : null}
+          </View>
+        ))}
+      </View>
+    );
+  }
+
+  // Link cards stay off the feed; the sandwich's detail page shows the source.
+  return null;
+}
+
+function TweetPlayBadge() {
+  const styles = useThemedStyles(makeStyles);
+  return (
+    <View pointerEvents="none" style={styles.tweetPlayBadge}>
+      <Ionicons name="play" size={18} color="#fff" />
+    </View>
+  );
+}
+
 export const SandwichCard = React.memo(function SandwichCard({
   sandwich,
   onPress,
@@ -602,6 +676,7 @@ export const SandwichCard = React.memo(function SandwichCard({
   showShare = true,
   showRemix = true,
   saved,
+  layout = "post",
 }: {
 
   sandwich: Sandwich;
@@ -618,6 +693,12 @@ export const SandwichCard = React.memo(function SandwichCard({
    * error, so the host reads it on the outside and hands the pieces in.
    */
   saved?: SandwichCardSavedControls;
+  /**
+   * `post` is the full timeline post. `holding` draws the sandwich the way a
+   * held position reads on the profile — asset face, byline and take, return
+   * on the right — for the Home and Explore feeds.
+   */
+  layout?: "post" | "holding";
 }) {
   const styles = useThemedStyles(makeStyles);
   const { colors } = useThemeStore();
@@ -648,11 +729,11 @@ export const SandwichCard = React.memo(function SandwichCard({
     sourceVideo && (sourceVideo.channelName ?? null)
       ? { name: sourceVideo.channelName as string, avatarUrl: sourceVideo.channelAvatarUrl }
       : null;
-  // When the source account owns the header, the card renders the post itself
-  // rather than the model's summary of it — otherwise the summary sits under
-  // that account's name as if they wrote it. Falls back to the take when the
-  // post text never made it into the source row.
-  const sourcePostText = !creator && sourceAuthor ? getSourcePostText(sandwich) : "";
+  // X cards always lead with the source post's own words, even when a Bread
+  // creator is credited beneath the source account. The generated take is only
+  // a fallback for legacy rows that never stored the original tweet text.
+  const sourcePostText =
+    isXPost && sourceAuthor ? getSourcePostText(sandwich) : "";
   const bodyText = sourcePostText || userThesisText;
   // The card IS the post now, so a separate origin toggle and embed would
   // repeat the same avatar, handle and words a second time.
@@ -671,6 +752,260 @@ export const SandwichCard = React.memo(function SandwichCard({
   // more" opens the sandwich detail rather than expanding the timeline card.
   const [thesisLineCount, setThesisLineCount] = useState(0);
   const thesisTruncatable = thesisLineCount > THESIS_COLLAPSED_LINES;
+  // Photos and link cards from the source tweet. Only the holding layout draws
+  // them; the post layout already embeds the whole tweet on demand.
+  const tweetMedia = useTweetMedia(
+    layout === "holding" && isXPost ? sandwich.source.sourceUrl : null,
+  );
+
+  // Shared by both layouts, so engagement behaves identically wherever the
+  // card is drawn.
+  const actionButtons = (
+    <>
+      <PressableScale
+      accessibilityRole="button"
+      accessibilityLabel={sandwich.viewerHasLiked ? "Unlike sandwich" : "Like sandwich"}
+      onPress={() => {
+        // Paint first, then let React catch up.
+        heartRef.current?.toggle(!sandwich.viewerHasLiked);
+        onToggleLike(sandwich);
+      }}
+      style={[styles.cardActionButton, !showShare && styles.cardActionButtonWide, styles.cardActionButtonCounted]}
+    >
+      <HeartToggle
+        ref={heartRef}
+        liked={sandwich.viewerHasLiked}
+        size={20}
+        idleColor={colors.textSecondary}
+      />
+      {/* The count floats out of flow, so an absent or growing number
+          never changes the spacing between the action icons. */}
+      <View pointerEvents="none" style={styles.likeCountSlot}>
+        <Text
+          numberOfLines={1}
+          style={[styles.likeButtonText, sandwich.viewerHasLiked && styles.likeButtonTextActive]}
+        >
+          {sandwich.likeCount > 0 ? formatCardCount(sandwich.likeCount) : ""}
+        </Text>
+      </View>
+    </PressableScale>
+    {/* The feed-row layout leaves Remix to the sandwich's own screen. */}
+    {showRemix && layout !== "holding" && composer ? (
+      <PressableScale
+        accessibilityRole="button"
+        accessibilityLabel="Remix sandwich"
+        accessibilityHint="Opens this basket in the composer to change and publish as your own"
+        onPress={(event) => {
+          event.stopPropagation();
+          void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+          composer.open({
+            remixOf: sandwich,
+            onCreated: (created) => {
+              toast.showToast("Your remix is live", "success");
+              detail?.open(created);
+            },
+          });
+        }}
+        style={[styles.cardActionButton, !showShare && styles.cardActionButtonWide]}
+      >
+        <RemixIcon size={20} color={colors.textSecondary} />
+      </PressableScale>
+    ) : null}
+    {POST_COMMENTS_ENABLED ? (
+      <PressableScale
+        accessibilityRole="button"
+        accessibilityLabel="Comment on sandwich"
+        onPress={(event) => {
+          event.stopPropagation();
+          (onComment ?? onPress)(sandwich);
+        }}
+        style={[styles.cardActionButton, !showShare && styles.cardActionButtonWide, styles.cardActionButtonCounted]}
+      >
+        <Ionicons name="chatbubble-outline" size={20} color={colors.textSecondary} />
+        {sandwich.commentCount > 0 ? (
+          <View pointerEvents="none" style={styles.likeCountSlot}>
+            <Text numberOfLines={1} style={styles.likeButtonText}>
+              {formatCardCount(sandwich.commentCount)}
+            </Text>
+          </View>
+        ) : null}
+      </PressableScale>
+    ) : null}
+    <PressableScale
+      accessibilityRole="button"
+      accessibilityLabel={bookmarked ? "Remove bookmark" : "Bookmark sandwich"}
+      accessibilityState={{ selected: bookmarked }}
+      onPress={(event) => {
+        event.stopPropagation();
+        if (!canSave) {
+          toast.showToast("Sign in to save sandwiches", "info");
+          return;
+        }
+        void toggleSave("sandwich", sandwich.id).then((saved) => {
+          toast.showToast(saved ? "Sandwich bookmarked" : "Bookmark removed", "info");
+        });
+      }}
+      style={[styles.cardActionButton, !showShare && styles.cardActionButtonWide]}
+    >
+      <Ionicons
+        name={bookmarked ? "bookmark" : "bookmark-outline"}
+        size={20}
+        color={bookmarked ? colors.accentBlue : colors.textSecondary}
+      />
+    </PressableScale>
+    {showShare ? (
+      <PressableScale
+        accessibilityRole="button"
+        accessibilityLabel="Share sandwich"
+        onPress={() => onShare(sandwich)}
+        style={[styles.cardActionButton, !showShare && styles.cardActionButtonWide]}
+      >
+        <ShareIcon size={20} color={colors.textSecondary} />
+      </PressableScale>
+    ) : null}
+
+    </>
+  );
+
+  if (layout === "holding") {
+    const orderedLegs = [...sandwich.legs].sort((a, b) => a.order - b.order);
+    // The leg that fronts the row: one with a stored image if any has one — the
+    // same pick the profile's holding card makes.
+    const faceLeg = orderedLegs.find((leg) => leg.imageUrl) ?? orderedLegs[0] ?? null;
+    const restLegs = orderedLegs.filter((leg) => leg !== faceLeg);
+    const faceLabel = faceLeg
+      ? faceLeg.type === "tokenized_stock"
+        ? getLegPrimaryLine(faceLeg).toUpperCase()
+        : getLegPrimaryLine(faceLeg)
+      : sandwich.name;
+    // Whoever made the call is the badge on the logo — cited account first,
+    // then the channel, then the builder — matching the handle beside it.
+    const primaryName = sourceAuthor
+      ? sourceAuthor.name
+      : videoChannel
+        ? videoChannel.name.replace(/^@/, "")
+        : creator
+          ? creator.name.replace(/^@/, "")
+          : null;
+    const primaryIsHandle = sourceAuthor ? sourceAuthor.isHandle : !videoChannel && Boolean(creator);
+    const cornerAvatarUri =
+      sourceAuthor?.avatarUrl ?? videoChannel?.avatarUrl ?? creator?.avatarUrl ?? null;
+    const cornerInitial = sourceAuthor?.initials ?? primaryName?.slice(0, 1).toUpperCase() ?? null;
+    const take = stripLinks(stripHiddenUrls(bodyText, tweetMedia.hiddenUrls));
+    const pnl = sandwich.pnlPct;
+
+    return (
+      <View
+        collapsable={false}
+        testID={isNativeZoomSource ? NATIVE_ZOOM_SOURCE_TEST_ID : undefined}
+      >
+        <PressableScale
+          accessibilityRole="button"
+          accessibilityLabel={`Open ${sandwich.name}${hasPnl ? `, return ${formatCardPnl(pnl)}` : ""}`}
+          onPress={() => onPress(sandwich)}
+          scaleTo={CARD_PRESS_SCALE}
+          style={styles.holdingCard}
+        >
+          {/* The basket's logos on the left; who called it, the take, media,
+              actions and the return in the column beside them. */}
+          <View style={styles.holdingMainRow}>
+            <View style={styles.holdingFace}>
+              <SandwichAvatarStack
+                size={FEED_FACE_SIZE}
+                legs={
+                  faceLeg
+                    ? [{
+                        iconUri: faceLeg.imageUrl ?? null,
+                        symbol: faceLeg.symbol ?? faceLeg.underlyingSymbol ?? null,
+                        mint: faceLeg.mint ?? null,
+                        initial: faceLabel.slice(0, 1).toUpperCase(),
+                      }]
+                    : []
+                }
+                legCount={faceLeg ? 1 : 0}
+                creatorAvatarUri={null}
+                creatorInitial={null}
+              />
+              {/* The rest of the basket rides the lead asset's corner. */}
+              {restLegs.length > 0 ? (
+                <View
+                  accessible
+                  accessibilityLabel={`and ${restLegs.length} more ${restLegs.length === 1 ? "asset" : "assets"}`}
+                  style={styles.holdingFaceBadges}
+                >
+                  {/* Logos only — capped at three so the corner stays on the
+                      lead asset; no "+N" count. */}
+                  {restLegs.slice(0, 3).map((leg, index) => (
+                    <View
+                      key={leg.id}
+                      style={[styles.holdingFaceBadge, index > 0 && styles.holdingFaceBadgeOverlap]}
+                    >
+                      <RemoteAssetLogo
+                        uri={leg.imageUrl}
+                        size={FEED_BADGE_SIZE}
+                        borderRadius={FEED_BADGE_SIZE / 2}
+                        backgroundColor={colors.surfaceAlt}
+                        fallback={
+                          <View style={[styles.holdingLegPillFallback, styles.holdingFaceBadgeFallback]}>
+                            <Text style={styles.holdingLegPillFallbackText}>
+                              {getLegPrimaryLine(leg).slice(0, 1).toUpperCase()}
+                            </Text>
+                          </View>
+                        }
+                      />
+                    </View>
+                  ))}
+                </View>
+              ) : null}
+            </View>
+
+            <View style={styles.holdingCopy}>
+              <View style={styles.holdingTitleRow}>
+                <Text numberOfLines={1} style={styles.holdingTitle}>
+                  {primaryIsHandle ? <Text style={styles.cardHandleAt}>@</Text> : null}
+                  {primaryName ?? "Unattributed"}
+                </Text>
+                {cornerAvatarUri || cornerInitial ? (
+                  <RemoteAssetLogo
+                    uri={cornerAvatarUri}
+                    size={20}
+                    borderRadius={10}
+                    backgroundColor={colors.surfaceAlt}
+                    fallback={
+                      <View style={styles.holdingLegPillFallback}>
+                        <Text style={styles.holdingLegPillFallbackText}>{cornerInitial ?? ""}</Text>
+                      </View>
+                    }
+                  />
+                ) : null}
+                <View style={styles.cardActionSpacer} />
+                <CardTimestamp createdAt={sandwich.createdAt} />
+              </View>
+
+              {take ? (
+                <Text numberOfLines={3} style={styles.holdingThesis}>
+                  {take}
+                </Text>
+              ) : null}
+
+              <CardTweetMedia media={tweetMedia} />
+
+              {/* Engagement spread across the row, the return closing it. */}
+              <View style={styles.holdingActionsRow}>
+                {actionButtons}
+                <Text
+                  numberOfLines={1}
+                  style={[styles.holdingReturn, { color: pnlColor(pnl, colors) }]}
+                >
+                  {hasPnl ? `${pnl! < 0 ? "\u25BC" : "\u25B2"} ${formatCardPnl(pnl).replace(/^[+-]/, "")}` : "--"}
+                </Text>
+              </View>
+            </View>
+          </View>
+        </PressableScale>
+      </View>
+    );
+  }
 
   return (
     <View
@@ -713,7 +1048,13 @@ export const SandwichCard = React.memo(function SandwichCard({
         {/* Content column, indented past the avatar */}
         <View style={styles.cardContent}>
           <View style={styles.cardCreatorRow}>
-            <Text numberOfLines={1} style={styles.cardHandle}>
+            <Text
+              numberOfLines={sourceAuthor?.isHandle ? undefined : 1}
+              style={[
+                styles.cardHandle,
+                sourceAuthor?.isHandle && styles.cardHandleUnclipped,
+              ]}
+            >
               {sourceAuthor ? (
                 <>
                   {sourceAuthor.isHandle ? (
@@ -844,107 +1185,7 @@ export const SandwichCard = React.memo(function SandwichCard({
 
           {/* Inline action row: engagement left, asset/PnL pill right. */}
           <View style={styles.cardActionsRow}>
-            <PressableScale
-              accessibilityRole="button"
-              accessibilityLabel={sandwich.viewerHasLiked ? "Unlike sandwich" : "Like sandwich"}
-              onPress={() => {
-                // Paint first, then let React catch up.
-                heartRef.current?.toggle(!sandwich.viewerHasLiked);
-                onToggleLike(sandwich);
-              }}
-              style={[styles.cardActionButton, !showShare && styles.cardActionButtonWide, styles.cardActionButtonCounted]}
-            >
-              <HeartToggle
-                ref={heartRef}
-                liked={sandwich.viewerHasLiked}
-                size={20}
-                idleColor={colors.textSecondary}
-              />
-              {/* The count floats out of flow, so an absent or growing number
-                  never changes the spacing between the action icons. */}
-              <View pointerEvents="none" style={styles.likeCountSlot}>
-                <Text
-                  numberOfLines={1}
-                  style={[styles.likeButtonText, sandwich.viewerHasLiked && styles.likeButtonTextActive]}
-                >
-                  {sandwich.likeCount > 0 ? formatCardCount(sandwich.likeCount) : ""}
-                </Text>
-              </View>
-            </PressableScale>
-            {showRemix && composer ? (
-              <PressableScale
-                accessibilityRole="button"
-                accessibilityLabel="Remix sandwich"
-                accessibilityHint="Opens this basket in the composer to change and publish as your own"
-                onPress={(event) => {
-                  event.stopPropagation();
-                  void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                  composer.open({
-                    remixOf: sandwich,
-                    onCreated: (created) => {
-                      toast.showToast("Your remix is live", "success");
-                      detail?.open(created);
-                    },
-                  });
-                }}
-                style={[styles.cardActionButton, !showShare && styles.cardActionButtonWide]}
-              >
-                <RemixIcon size={20} color={colors.textSecondary} />
-              </PressableScale>
-            ) : null}
-            {POST_COMMENTS_ENABLED ? (
-              <PressableScale
-                accessibilityRole="button"
-                accessibilityLabel="Comment on sandwich"
-                onPress={(event) => {
-                  event.stopPropagation();
-                  (onComment ?? onPress)(sandwich);
-                }}
-                style={[styles.cardActionButton, !showShare && styles.cardActionButtonWide, styles.cardActionButtonCounted]}
-              >
-                <Ionicons name="chatbubble-outline" size={20} color={colors.textSecondary} />
-                {sandwich.commentCount > 0 ? (
-                  <View pointerEvents="none" style={styles.likeCountSlot}>
-                    <Text numberOfLines={1} style={styles.likeButtonText}>
-                      {formatCardCount(sandwich.commentCount)}
-                    </Text>
-                  </View>
-                ) : null}
-              </PressableScale>
-            ) : null}
-            <PressableScale
-              accessibilityRole="button"
-              accessibilityLabel={bookmarked ? "Remove bookmark" : "Bookmark sandwich"}
-              accessibilityState={{ selected: bookmarked }}
-              onPress={(event) => {
-                event.stopPropagation();
-                if (!canSave) {
-                  toast.showToast("Sign in to save sandwiches", "info");
-                  return;
-                }
-                void toggleSave("sandwich", sandwich.id).then((saved) => {
-                  toast.showToast(saved ? "Sandwich bookmarked" : "Bookmark removed", "info");
-                });
-              }}
-              style={[styles.cardActionButton, !showShare && styles.cardActionButtonWide]}
-            >
-              <Ionicons
-                name={bookmarked ? "bookmark" : "bookmark-outline"}
-                size={20}
-                color={bookmarked ? colors.accentBlue : colors.textSecondary}
-              />
-            </PressableScale>
-            {showShare ? (
-              <PressableScale
-                accessibilityRole="button"
-                accessibilityLabel="Share sandwich"
-                onPress={() => onShare(sandwich)}
-                style={[styles.cardActionButton, !showShare && styles.cardActionButtonWide]}
-              >
-                <ShareIcon size={20} color={colors.textSecondary} />
-              </PressableScale>
-            ) : null}
-
+            {actionButtons}
             {sandwich.legs.length > 0 || hasPnl ? (
               <View style={styles.cardAssetPnlPill}>
                 <CardAssetIcons legs={sandwich.legs} />
@@ -1302,29 +1543,156 @@ export const PodcastGroupCard = React.memo(function PodcastGroupCard({
 });
 
 const makeStyles = (c: ThemeColors) => StyleSheet.create({
+  // ── Holding layout: a market-list row, like the token lists. ──
+  holdingCard: {
+    paddingVertical: 12,
+  },
+  holdingMainRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 12,
+  },
+  holdingCopy: {
+    flex: 1,
+    minWidth: 0,
+    gap: 2,
+  },
+  holdingTitleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  // A step under the take: the post is the content, the name is the byline.
+  holdingTitle: {
+    flexShrink: 1,
+    color: c.text,
+    fontSize: 15,
+    lineHeight: 20,
+    fontWeight: "700",
+    fontFamily: F,
+  },
+  holdingFace: {
+    width: FEED_FACE_SIZE,
+    height: FEED_FACE_SIZE,
+  },
+  // Anchored to the logo's bottom-right and growing leftwards, so the badges
+  // sit over the lead asset rather than spilling into the text.
+  holdingFaceBadges: {
+    position: "absolute",
+    right: -4,
+    bottom: -4,
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  // Ringed in the page colour to cut each badge out of what it overlaps.
+  holdingFaceBadge: {
+    borderRadius: FEED_BADGE_SIZE / 2 + 2,
+    borderWidth: 2,
+    borderColor: c.background,
+  },
+  // Tight enough that three badges stay within the lead logo's width.
+  holdingFaceBadgeOverlap: {
+    marginLeft: -9,
+  },
+  holdingLegPillFallback: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: c.surface,
+  },
+  holdingFaceBadgeFallback: {
+    width: FEED_BADGE_SIZE,
+    height: FEED_BADGE_SIZE,
+    borderRadius: FEED_BADGE_SIZE / 2,
+  },
+  holdingLegPillFallbackText: {
+    color: c.text,
+    fontSize: 10,
+    fontWeight: "700",
+    fontFamily: F,
+  },
+  holdingThesis: {
+    marginTop: 4,
+    color: c.text,
+    fontSize: 16,
+    lineHeight: 23,
+    fontWeight: "500",
+    fontFamily: F,
+  },
+  holdingActionsRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginTop: 4,
+  },
+  // Rubik, the app's figure face. The weight lives in the font file, so no
+  // fontWeight — pairing one with a custom family can fall back to the system face.
+  holdingReturn: {
+    fontSize: 15,
+    fontFamily: F_DISPLAY_MEDIUM,
+    fontVariant: ["tabular-nums"],
+    textAlign: "right",
+  },
+  tweetMediaFill: {
+    width: "100%",
+    height: "100%",
+  },
+  tweetMediaGrid: {
+    aspectRatio: 16 / 9,
+    flexDirection: "column",
+    flexWrap: "wrap",
+    gap: 2,
+  },
+  tweetMediaCell: {
+    width: "49.7%",
+    height: "49.6%",
+  },
+  tweetMediaCellTall: {
+    height: "100%",
+  },
+  tweetPlayBadge: {
+    position: "absolute",
+    alignSelf: "center",
+    top: "50%",
+    marginTop: -20,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(0,0,0,0.55)",
+  },
+  tweetMedia: {
+    marginTop: 10,
+    borderRadius: 14,
+    overflow: "hidden",
+    backgroundColor: c.surfaceAlt,
+  },
   card: {
     paddingHorizontal: 2,
-    paddingTop: 20,
-    paddingBottom: 20,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: c.border,
+    // Keep a compact post-to-post rhythm without drawing separator rules.
+    paddingTop: 16,
+    paddingBottom: 8,
   },
-  // Every slot is the same width, so the icons sit at an even pitch whether
-  // or not a count hangs off one; 56 leaves room for a "1.2K" beside a heart.
+  // Compact visual pitch with a full touch target. Counted actions get four
+  // extra points so a short count can sit beside the icon without pushing the
+  // remaining controls apart.
   cardActionButton: {
-    width: 56,
+    width: 40,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "flex-start",
-    minHeight: 44,
+    minHeight: 40,
     paddingHorizontal: 0,
     paddingVertical: 0,
   },
   cardActionButtonWide: {
-    width: 56,
+    width: 44,
   },
   cardActionButtonCounted: {
-    width: 56,
+    width: 44,
   },
   cardActionSpacer: {
     flex: 1,
@@ -1332,8 +1700,8 @@ const makeStyles = (c: ThemeColors) => StyleSheet.create({
   cardActionsRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 0,
-    marginTop: 12,
+    justifyContent: "space-between",
+    marginTop: 4,
   },
   takeBasketName: {
     flex: 1,
@@ -1342,15 +1710,20 @@ const makeStyles = (c: ThemeColors) => StyleSheet.create({
   cardAssetPnlPill: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
-    minHeight: 34,
-    paddingHorizontal: 7,
-    paddingVertical: 4,
+    justifyContent: "center",
+    gap: 8,
+    minHeight: 40,
+    paddingHorizontal: 11,
+    paddingVertical: 5,
     borderRadius: 999,
-    backgroundColor: withAlpha(c.surfaceAlt, 0.68),
-    // Pushed to the trailing edge without a flex spacer — a spacer would have
-    // eaten a row gap on each side of itself.
-    marginLeft: "auto",
+    // Match the card instead of painting a grey chip; elevation alone defines
+    // the pill, so the asset stack and P&L stay visually light.
+    backgroundColor: c.background,
+    shadowColor: c.shadow,
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: c.background === "#ffffff" ? 0.13 : 0.34,
+    shadowRadius: 8,
+    elevation: 3,
     flexShrink: 1,
     minWidth: 0,
   },
@@ -1389,6 +1762,9 @@ const makeStyles = (c: ThemeColors) => StyleSheet.create({
     letterSpacing: 0,
     fontFamily: F,
   },
+  cardHandleUnclipped: {
+    flexShrink: 0,
+  },
   // Rung 4 (quaternary): the "@" is pure decoration around the handle.
   cardHandleAt: {
     color: c.textQuaternary,
@@ -1405,9 +1781,9 @@ const makeStyles = (c: ThemeColors) => StyleSheet.create({
     overflow: "hidden",
   },
   cardLegsStackFallback: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
     borderWidth: 2,
     borderColor: c.surfaceAlt,
     backgroundColor: c.border,
@@ -1426,7 +1802,7 @@ const makeStyles = (c: ThemeColors) => StyleSheet.create({
   cardPnlInline: {
     // Never yields width — the icon stack shrinks first.
     flexShrink: 0,
-    fontSize: 14,
+    fontSize: 15,
     fontWeight: "700",
     fontFamily: F_DISPLAY_MEDIUM,
     letterSpacing: -0.3,
@@ -1554,9 +1930,9 @@ const makeStyles = (c: ThemeColors) => StyleSheet.create({
     minWidth: 0,
   },
   legImageFallback: {
-    width: 46,
-    height: 46,
-    borderRadius: 23,
+    width: LEG_LOGO_SIZE,
+    height: LEG_LOGO_SIZE,
+    borderRadius: LEG_LOGO_SIZE / 2,
     backgroundColor: c.text,
     alignItems: "center",
     justifyContent: "center",

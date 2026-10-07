@@ -446,7 +446,7 @@ const makeStyles = (c: ThemeColors) =>
       fontSize: 13,
       lineHeight: 18,
       fontWeight: "600",
-      color: "#D3484F",
+      color: c.negative,
     },
 
     buyButton: {

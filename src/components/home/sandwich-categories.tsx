@@ -8,6 +8,7 @@ import type { Sandwich, SandwichPost } from '@/lib/api';
 import { useThemeStore } from '@/lib/theme-store';
 import { usePodcastGroup } from '@/lib/podcast-group-store';
 import type { PodcastGroupVideo } from '@/components/podcast-sandwich-group-card';
+import { LoadErrorState } from '@/components/load-error-state';
 import { PodcastGroupCard, SandwichCard } from '@/components/sandwich-card';
 import {
   SandwichShareSheet,
@@ -202,17 +203,11 @@ export function SandwichCategories({
             </Text>
           </View>
         ) : savedItems.length === 0 ? (
-          <View style={styles.stateBlock}>
-            <Text style={styles.stateTitle}>Couldn&apos;t load saved sandwiches.</Text>
-            <PressableScale
-              accessibilityRole="button"
-              accessibilityLabel="Retry saved sandwiches"
-              onPress={() => void saved.refresh()}
-              style={styles.actionButton}
-            >
-              <Text style={styles.actionText}>Retry</Text>
-            </PressableScale>
-          </View>
+          <LoadErrorState
+            size="section"
+            title="Couldn't load saved sandwiches"
+            onRetry={() => void saved.refresh()}
+          />
         ) : (
           <View>
             {savedItems.map((item) =>
@@ -234,6 +229,7 @@ export function SandwichCategories({
                   onToggleLike={saved.toggleLike}
                   onComment={saved.openComments}
                   onShare={shareSandwich}
+                  layout="holding"
                 />
               ),
             )}
@@ -260,17 +256,7 @@ export function SandwichCategories({
           ))}
         </View>
       ) : failed && posts.length === 0 ? (
-        <View style={styles.stateBlock}>
-          <Text style={styles.stateTitle}>Couldn&apos;t load sandwiches.</Text>
-          <PressableScale
-            accessibilityRole="button"
-            accessibilityLabel="Retry community sandwiches"
-            onPress={onRetry}
-            style={styles.actionButton}
-          >
-            <Text style={styles.actionText}>Retry</Text>
-          </PressableScale>
-        </View>
+        <LoadErrorState size="section" title="Couldn't load sandwiches" onRetry={onRetry} />
       ) : feedItems.length === 0 ? (
         <View style={styles.stateBlock}>
           <Text style={styles.stateTitle}>No sandwiches in the latest batch.</Text>
@@ -311,6 +297,7 @@ export function SandwichCategories({
                 onToggleLike={onToggleLike}
                 onComment={onComment}
                 onShare={shareSandwich}
+                layout="holding"
               />
             ),
           )}

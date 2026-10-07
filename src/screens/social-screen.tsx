@@ -24,6 +24,7 @@ import {
 import { Fonts, type ThemeColors } from '@/constants/theme';
 import { useThemeStore } from '@/lib/theme-store';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
+import { LoadErrorState } from '@/components/load-error-state';
 import { FollowButton } from '@/components/follow-button';
 import { HandleText } from '@/components/handle-text';
 import { ValueSkeleton } from '@/components/value-skeleton';
@@ -307,12 +308,11 @@ export function SocialScreen({
             key={`${activeTab}-error`}
             entering={FadeIn.duration(180).reduceMotion(ReduceMotion.System)}
             style={styles.center}>
-            <Text style={styles.errorText}>{currentState.error}</Text>
-            <Pressable
-              onPress={() => activeTab === 'followers' ? void loadFollowers() : void loadFollowing()}
-              style={styles.retryBtn}>
-              <Text style={styles.retryBtnText}>Retry</Text>
-            </Pressable>
+            <LoadErrorState
+              size="section"
+              title={activeTab === 'followers' ? "Couldn't load followers" : "Couldn't load following"}
+              onRetry={() => activeTab === 'followers' ? void loadFollowers() : void loadFollowing()}
+            />
           </Animated.View>
         ) : currentState.entries.length === 0 ? (
           <Animated.View

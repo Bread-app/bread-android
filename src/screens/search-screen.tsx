@@ -869,7 +869,7 @@ export function SearchResults({
   }
 
   function sandwichPnlColor(s: Sandwich) {
-    return s.pnlPct === null ? "#94a3b8" : s.pnlPct >= 0 ? "#02ED45" : "#EE1E52";
+    return s.pnlPct === null ? "#94a3b8" : s.pnlPct >= 0 ? "#02ED45" : "#FF1AB8";
   }
 
   // Portfolio (curated) row — square cover thumbnail, name + asset count.

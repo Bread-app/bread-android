@@ -78,7 +78,7 @@ const APP_GREEN = '#02ED45';
 /** The same green as type rather than as a badge — #35F046 on white is
  *  unreadable at 15px, so numbers get the ink version of it. */
 const BRAND_GREEN_INK = '#16A34A';
-const BRAND_RED = '#EE1E52';
+const BRAND_RED = '#FF1AB8';
 
 /**
  * How much of the bottom edge the share + close block occupies, above the
@@ -1127,7 +1127,7 @@ function PerpReceiptDetail({
                     {
                       backgroundColor: pnlPositive
                         ? 'rgba(22, 163, 74, 0.10)'
-                        : 'rgba(238, 30, 82, 0.10)',
+                        : 'rgba(255, 26, 184, 0.10)',
                     },
                   ]}>
                   <Text
@@ -1350,15 +1350,38 @@ export function BuySuccessSheet({
     /did not share|cancel/i.test(err instanceof Error ? err.message : '');
 
   /**
-   * X has no way to attach an image: every entry point into its composer is a
-   * URL scheme, and a scheme carries text only (react-native-share's own
-   * Twitter target is the same `twitter://post?message=` we would call here).
-   * So the image goes to the clipboard and the composer opens with the words
-   * already in it — one paste away from the post the user actually wants.
+   * X, with the receipt actually attached.
+   *
+   * Every URL scheme into X's composer carries text only — `twitter://post`
+   * and the web intent both, and react-native-share's own Twitter target is
+   * the same scheme — so deep-linking can never attach an image. The system
+   * share sheet can: X registers a share extension that takes a PNG and opens
+   * the composer with it already in the post. So the button opens the sheet
+   * with the image and the words, and the user taps X once.
+   *
+   * The old behaviour (image on the clipboard, composer open, paste it
+   * yourself) stays as the fallback for when the sheet can't be presented.
    */
   const handleShareToX = async () => {
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     const base64 = await captureShareImage();
+
+    if (base64) {
+      try {
+        await RNShare.open({
+          url: `data:image/png;base64,${base64}`,
+          type: 'image/png',
+          filename: 'bread-receipt',
+          message: shareMessage,
+          failOnCancel: false,
+        });
+        return;
+      } catch (err) {
+        if (isCancellation(err)) return;
+        // fall through to the clipboard + composer route
+      }
+    }
+
     let copied = false;
     if (base64) {
       try {
@@ -2247,7 +2270,7 @@ const makeStyles = (c: ThemeColors) => StyleSheet.create({
     color: '#16A34A',
   },
   shareCardPnlDown: {
-    color: '#DC2626',
+    color: BRAND_RED,
   },
   shareCardDivider: {
     alignSelf: 'stretch',

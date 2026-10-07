@@ -36,6 +36,7 @@ import { stashPodcastCall } from "@/lib/podcast-call-handoff";
 import { useFocusEffect } from "@react-navigation/native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { LoadErrorState } from "@/components/load-error-state";
 import { ValueSkeleton } from "@/components/value-skeleton";
 import { VerifiedBadge } from "@/components/verified-badge";
 import { DepositSheet, type DepositSheetRef } from "@/components/deposit-sheet";
@@ -204,7 +205,7 @@ const F = Fonts.rounded;
 // Realized P&L graph (own profile) — mirrors the other-user profile screen.
 const PORTFOLIO_RANGES: PortfolioRange[] = ["24H", "7d", "30d"];
 const PORTFOLIO_UP = "#02ED45";
-const PORTFOLIO_DOWN = "#EE1E52";
+const PORTFOLIO_DOWN = "#FF1AB8";
 
 // Hide dust holdings: anything under this USD value rounds to "$0.00" and reads
 // as a placeholder row, so we drop it from the Holdings list entirely.
@@ -397,22 +398,14 @@ function ClosedHoldingsList({
   // real answer and gets its own copy below.
   if (positions === null) {
     return error ? (
-      <View style={styles.emptyState}>
-        <Text style={styles.emptyIcon}>⚠️</Text>
-        <Text style={styles.emptyText}>Couldn&apos;t load history</Text>
-        <Text style={styles.balanceError}>{error}</Text>
-        <PressableScale
-          accessibilityRole="button"
-          accessibilityLabel="Retry loading closed positions"
-          onPress={() => {
-            void Haptics.selectionAsync();
-            onRetry();
-          }}
-          style={styles.holdingsRetryBtn}
-        >
-          <Text style={styles.holdingsRetryText}>Retry</Text>
-        </PressableScale>
-      </View>
+      <LoadErrorState
+        size="section"
+        title="Couldn't load history"
+        onRetry={() => {
+          void Haptics.selectionAsync();
+          onRetry();
+        }}
+      />
     ) : (
       <>{renderSkeletons(4, "Loading closed positions")}</>
     );
@@ -3935,22 +3928,14 @@ export function ProfileScreen() {
             // Balances failed AND nothing cached to fall back on. Without this
             // branch the tab renders nothing at all — a blank screen with no
             // explanation and no way to retry.
-            <View style={styles.emptyState}>
-              <Text style={styles.emptyIcon}>⚠️</Text>
-              <Text style={styles.emptyText}>Couldn&apos;t load holdings</Text>
-              <Text style={styles.balanceError}>{balanceError}</Text>
-              <PressableScale
-                accessibilityRole="button"
-                accessibilityLabel="Retry loading holdings"
-                onPress={() => {
-                  void Haptics.selectionAsync();
-                  void walletStore.refresh();
-                }}
-                style={styles.holdingsRetryBtn}
-              >
-                <Text style={styles.holdingsRetryText}>Retry</Text>
-              </PressableScale>
-            </View>
+            <LoadErrorState
+              size="section"
+              title="Couldn't load holdings"
+              onRetry={() => {
+                void Haptics.selectionAsync();
+                void walletStore.refresh();
+              }}
+            />
           )
         ) : myTimeline.length > 0 ? (
           // One episode is one card, exactly as in the feed — posting a card

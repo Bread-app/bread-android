@@ -7501,6 +7501,16 @@ export async function disconnectX(): Promise<void> {
   await requestJson('/api/x/connect', { method: 'DELETE' });
 }
 
+/**
+ * Pull the linked X account's following list (`GET /2/users/:id/following`,
+ * needs the `follows.read` scope on the OAuth 2.0 grant) so the server can
+ * auto-follow anyone already on Bread and weight the feed toward the creators
+ * the user already reads on X.
+ */
+export async function syncXFollowing(): Promise<{ imported: number; matchedOnBread: number }> {
+  return requestJson('/api/x/following/sync', { method: 'POST', timeoutMs: 60_000 });
+}
+
 export type AutoBuyMode = 'confirm' | 'auto';
 
 export type AutoBuyConfig = {

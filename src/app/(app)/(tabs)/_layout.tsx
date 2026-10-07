@@ -127,7 +127,10 @@ export default function TabsLayout() {
       }
       shadowColor={withAlpha(colors.border, 0.7)}
       disableTransparentOnScrollEdge
-      minimizeBehavior="onScrollDown">
+      disableIndicator
+      indicatorColor="transparent"
+      rippleColor="transparent"
+      minimizeBehavior="onScrollUp">
       <NativeTabs.Trigger name="home">
         <Label hidden />
         <Icon

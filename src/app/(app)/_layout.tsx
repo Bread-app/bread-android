@@ -93,6 +93,15 @@ export default function ProtectedAppLayout() {
                     contentStyle: { backgroundColor: colors.background },
                   }}>
                   <Stack.Screen name="(tabs)" />
+                  {/* Full-screen vertical sandwich pager (TikTok-style). Always
+                      dark, so it carries its own background and slides up. */}
+                  <Stack.Screen
+                    name="reels"
+                    options={{
+                      animation: 'slide_from_bottom',
+                      contentStyle: { backgroundColor: '#0b0b0f' },
+                    }}
+                  />
                   {/* Full-screen thesis detail, pushed over the tab bar with
                       UIKit's zoom when a visible post card opened it. The
                       default side-push remains the no-source fallback. The

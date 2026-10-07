@@ -59,6 +59,7 @@ import {
   type HoldingsCategoryFilter,
   type HoldingsCategoryKey,
 } from '@/components/holdings-category-switch';
+import { LoadErrorState } from '@/components/load-error-state';
 import { PublicSandwichHoldingCard } from '@/components/sandwich-holding-card';
 import { useThemeStore } from '@/lib/theme-store';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
@@ -104,7 +105,7 @@ import {
 const F = Fonts.rounded;
 
 const COLOR_UP = '#02ED45';
-const COLOR_DOWN = '#EE1E52';
+const COLOR_DOWN = '#FF1AB8';
 const RANGES: PortfolioRange[] = ['24H', '7d', '30d'];
 
 type Tab = 'holdings' | 'sandwiches';
@@ -1469,7 +1470,6 @@ function UserProfileView({
       openTakeSandwich,
       postsById,
       userTakes,
-      styles.holdingRowPressed,
       styles.sandwichCardWrap,
       styles.holdingCardWrap,
       styles.closedPositionWrap,
@@ -1509,20 +1509,7 @@ function UserProfileView({
     closedLoading || closedPositions === null ? (
       rowSkeletons(4, 'Loading closed positions')
     ) : closedFailed ? (
-      <View style={styles.listLoading}>
-        <Text style={styles.emptyText}>Couldn&apos;t load this history.</Text>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Retry loading closed positions"
-          onPress={() => loadClosed()}
-          style={({ pressed }) => [
-            styles.holdingsRetryBtn,
-            pressed && styles.holdingRowPressed,
-          ]}
-        >
-          <Text style={styles.holdingsRetryText}>Retry</Text>
-        </Pressable>
-      </View>
+      <LoadErrorState size="section" title="Couldn't load history" onRetry={() => loadClosed()} />
     ) : (
       <View style={styles.listLoading}><Text style={styles.emptyText}>No closed positions yet</Text></View>
     )
@@ -1530,9 +1517,7 @@ function UserProfileView({
     holdingsLoading || perpsLoading || sandwichPositionsLoading ? (
       rowSkeletons(4, 'Loading holdings')
     ) : holdingsFailed ? (
-      <View style={styles.listLoading}>
-        <Text style={styles.emptyText}>Couldn&apos;t load holdings. Pull to retry.</Text>
-      </View>
+      <LoadErrorState size="section" title="Couldn't load holdings" onRetry={() => void load()} />
     ) : (
       <View style={styles.listLoading}><Text style={styles.emptyText}>No holdings yet</Text></View>
     )

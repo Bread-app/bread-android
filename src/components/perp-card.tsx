@@ -13,7 +13,7 @@ import { PressableScale } from '@/components/pressable-scale';
 const F = Fonts.rounded;
 
 const POSITIVE = "#02ED45";
-const NEGATIVE = "#EE1E52";
+const NEGATIVE = "#FF1AB8";
 
 export type PerpCardSummary = {
   /** False when the wallet has never registered a Phoenix trader. */

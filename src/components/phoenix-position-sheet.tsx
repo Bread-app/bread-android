@@ -64,7 +64,7 @@ const HAS_GLASS = Platform.OS === 'ios' && isGlassEffectAPIAvailable();
 // the theme's own tones. (Sharing renders its own card in AssetShareSheet, so
 // nothing here has to stay light for a capture.)
 const CARD_POS = '#02ED45';
-const CARD_NEG = '#EE1E52';
+const CARD_NEG = '#FF1AB8';
 
 
 // The pinned actions, on the app's shared CTA geometry: margin and radius come

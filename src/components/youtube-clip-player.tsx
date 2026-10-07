@@ -45,6 +45,12 @@ type Props = {
    */
   onError?: () => void;
   onStateChange?: (state: 'playing' | 'paused' | 'ended') => void;
+  /**
+   * Playback position in ms, ~4x a second while playing. Opt-in: passing it is
+   * what turns the page's reporting on, so players that don't sync anything to
+   * the video don't pay for a bridge message every 250ms.
+   */
+  onTime?: (ms: number) => void;
   style?: StyleProp<ViewStyle>;
 };
 
@@ -65,7 +71,13 @@ const CLIP_END_PAD_S = 2;
  */
 function buildPlayerHtml(
   videoId: string,
-  opts: { autoplay: boolean; hideControls: boolean; startSeconds: number; endSeconds: number | null },
+  opts: {
+    autoplay: boolean;
+    hideControls: boolean;
+    startSeconds: number;
+    endSeconds: number | null;
+    reportTime: boolean;
+  },
 ): string {
   const id = JSON.stringify(videoId);
   const start = Math.max(0, Math.floor(opts.startSeconds));
@@ -118,6 +130,9 @@ window.__clip=function(s,e){
   // platform refuses, the player's own controls still offer unmute.
   player.unMute();player.setVolume(100);
 };
+${opts.reportTime ? `setInterval(function(){
+  if(player&&player.getPlayerState&&player.getPlayerState()===1)post('t:'+Math.round(player.getCurrentTime()*1000));
+},250);` : ''}
 window.__cmd=function(c){
   if(!player||!player.playVideo)return;
   if(c==='play')player.playVideo();
@@ -144,6 +159,7 @@ export const YouTubeClipPlayer = forwardRef<YouTubeClipPlayerHandle, Props>(func
     renderFallback,
     onError,
     onStateChange,
+    onTime,
     style,
   },
   ref,
@@ -158,6 +174,7 @@ export const YouTubeClipPlayer = forwardRef<YouTubeClipPlayerHandle, Props>(func
   const pendingSeekRef = useRef<{ startMs: number; endMs: number | null } | null>(null);
 
   const startSeconds = Math.max(0, Math.floor((initialStartMs ?? 0) / 1000));
+  const reportTime = onTime !== undefined;
   const html = useMemo(
     () =>
       buildPlayerHtml(videoId, {
@@ -165,11 +182,12 @@ export const YouTubeClipPlayer = forwardRef<YouTubeClipPlayerHandle, Props>(func
         hideControls,
         startSeconds,
         endSeconds: initialEndMs != null ? Math.floor(initialEndMs / 1000) + CLIP_END_PAD_S : null,
+        reportTime,
       }),
     // `initialStartMs` is baked into the page, so changing it rebuilds the HTML
     // and reloads the player — correct when the screen switches to a different
     // sandwich, and never hit during a normal seek (which goes through `seek`).
-    [videoId, autoplay, hideControls, startSeconds, initialEndMs],
+    [videoId, autoplay, hideControls, startSeconds, initialEndMs, reportTime],
   );
 
   const inject = useCallback((script: string) => {
@@ -269,6 +287,8 @@ export const YouTubeClipPlayer = forwardRef<YouTubeClipPlayerHandle, Props>(func
             onStateChange?.('paused');
           } else if (data === 'ended') {
             onStateChange?.('ended');
+          } else if (data.startsWith('t:')) {
+            onTime?.(Number(data.slice(2)));
           } else if (data.startsWith('error:')) {
             setFailed(true);
             onError?.();
