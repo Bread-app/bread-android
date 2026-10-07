@@ -137,6 +137,7 @@ import {
   commitSandwichDraft,
   MAX_COMMENTARY_LENGTH,
   MAX_PERP_SANDWICH_LEGS,
+  PAYWALLED_ARTICLE_WARNING,
   createJupiterOrder,
   createManualSandwich,
   createSandwichFromInput,
@@ -1676,9 +1677,9 @@ export function SandwichComposerScreen() {
       );
       return;
     }
-    // Allocations are only ever set by the user now (no auto-redistribution
-    // on drag), so the total can legitimately be anything — only block here,
-    // at the moment of confirming, with a tolerance for rounding drift.
+    // Slider drags keep the split at 100%, but a draft's starting weights
+    // (AI / remix parent) may not — block here, at the moment of confirming,
+    // with a tolerance for rounding drift.
     const totalPct = draft.legs.reduce((sum, leg) => sum + leg.weightBps, 0) / 100;
     if (Math.abs(totalPct - 100) > 0.5) {
       setError(
@@ -2858,6 +2859,7 @@ function ComposerPreviewView({
   const bylineAvatarUrl = avatarUrl ?? profile?.avatarUrl ?? null;
   const initials = (handle ?? appUser?.name?.trim() ?? "Y").slice(0, 1).toUpperCase();
   const postText = draft.commentary.trim() || draft.summary.trim() || draft.name.trim();
+  const fromPaywallPreview = draft.warnings.includes(PAYWALLED_ARTICLE_WARNING);
 
   return (
     <View>
@@ -2884,6 +2886,14 @@ function ComposerPreviewView({
           </View>
         </View>
         {postText ? <Text style={styles.sheetHeroThesis}>{postText}</Text> : null}
+        {fromPaywallPreview ? (
+          <View style={styles.previewPaywallNotice}>
+            <Ionicons name="lock-closed" size={14} color={colors.textSecondary} />
+            <Text style={styles.previewPaywallNoticeText}>
+              This post is paywalled, so only its free preview was read. Paste the full text for a sharper Sandwich.
+            </Text>
+          </View>
+        ) : null}
         {draft.remixOf?.builderUsername ? (
           <Text style={styles.detailCreatedAt}>
             remix of @{draft.remixOf.builderUsername.replace(/^@+/, "")}
@@ -3008,9 +3018,8 @@ function ComposerReviewView({
 
   // All leg allocations live in ONE shared-value array owned here so every
   // row can read/write its own index without a per-frame React re-render.
-  // Dragging a leg moves exactly ONE counterpart leg to keep the total at
-  // 100% (see `adjustWithCounterpart` in {@link ComposerLegRow}) — every
-  // other leg stays put. `trackWidth` is shared too (every slider track is
+  // Dragging a leg rescales every other leg proportionally to keep the total
+  // at 100% (see {@link redistributeFromBase}). `trackWidth` is shared too (every slider track is
   // the same width).
   const ratios = useSharedValue<number[]>(
     fairPercents(draft.legs.map((leg) => leg.weightBps / 10000)).map((p) => p / 100),
@@ -3018,11 +3027,6 @@ function ComposerReviewView({
   const [liveRatios, setLiveRatios] = useState<number[]>(() =>
     fairPercents(draft.legs.map((leg) => leg.weightBps / 10000)).map((p) => p / 100),
   );
-  // Legs the user has already dragged to a deliberate value. A later drag on
-  // a *different* leg picks its one counterpart from the unpinned legs first,
-  // so a value you already set (e.g. 50%) doesn't get silently pulled back
-  // down just because it happens to be the largest leg.
-  const pinned = useSharedValue<boolean[]>(draft.legs.map(() => false));
   const trackWidth = useSharedValue(0);
   const legCount = draft.legs.length;
 
@@ -3043,14 +3047,6 @@ function ComposerReviewView({
     () => fairPercents(draft.legs.map((leg) => leg.weightBps / 10000)),
     [weightsKey],
   );
-
-  // Pins reset only when the *set* of legs changes (add/remove) — not on
-  // every weight commit, since a drag's own onEnd commit would otherwise
-  // immediately wipe the pin it just set.
-  const legIdsKey = draft.legs.map((leg) => leg.id).join("|");
-  useEffect(() => {
-    pinned.value = draft.legs.map(() => false);
-  }, [legIdsKey]);
 
   const commentaryLeft = MAX_COMMENTARY_LENGTH - draft.commentary.length;
   const isShortDraft = draft.direction === "down";
@@ -3114,11 +3110,7 @@ function ComposerReviewView({
               accessibilityRole="button"
               accessibilityLabel="Split allocation evenly"
               hitSlop={8}
-              onPress={() => {
-                // Explicit reset — clear every pin so all legs float freely.
-                pinned.value = draft.legs.map(() => false);
-                onEvenSplit();
-              }}
+              onPress={onEvenSplit}
               style={styles.composerEvenSplitBtn}
             >
               <Ionicons name="sync" size={12} color={colors.accentBlue} />
@@ -3193,7 +3185,6 @@ function ComposerReviewView({
             ratios={ratios}
             liveRatios={liveRatios}
             setLiveRatios={setLiveRatios}
-            pinned={pinned}
             initialPct={initialPercents[index] ?? 0}
             trackWidth={trackWidth}
             onRemove={() => onRemoveLeg(leg.id)}
@@ -3295,19 +3286,52 @@ const AnimatedTextInput = Animated.createAnimatedComponent(TextInput);
 const SLIDER_THUMB_DIAM = 24;
 const SLIDER_THUMB_R = SLIDER_THUMB_DIAM / 2;
 
-function largestOtherLeg(ratios: number[], index: number): number {
+/**
+ * Set leg `index` to `target` (0–1) and rescale every OTHER leg proportionally
+ * to its share in `base` (the split when the drag began) so the total stays at
+ * exactly 100%. Results are whole percentage points: the dragged leg gets its
+ * rounded target, the remainder is spread over the others by largest
+ * remainder. Rescaling from the drag-start snapshot (not the live array) keeps
+ * the others' relative proportions stable however far the thumb travels, and
+ * lets a leg drained to 0% grow back when the drag reverses.
+ */
+function redistributeFromBase(base: number[], index: number, target: number): number[] {
   "worklet";
-  let counterpart = -1;
-  let largest = -1;
-  for (let offset = 1; offset < ratios.length; offset++) {
-    const candidate = (index + offset) % ratios.length;
-    const share = ratios[candidate] ?? 0;
-    if (share > largest) {
-      largest = share;
-      counterpart = candidate;
-    }
+  const n = base.length;
+  if (n === 0) return [];
+  if (n === 1) return [1];
+  const targetPct = Math.round(Math.max(0, Math.min(1, target)) * 100);
+  const remaining = 100 - targetPct;
+  let othersSum = 0;
+  for (let i = 0; i < n; i++) {
+    if (i !== index) othersSum += Math.max(0, base[i] ?? 0);
   }
-  return counterpart;
+  const floors = new Array<number>(n).fill(0);
+  const fracs = new Array<number>(n).fill(-1);
+  let assigned = 0;
+  for (let i = 0; i < n; i++) {
+    if (i === index) continue;
+    // Others that were all at 0% share the remainder equally.
+    const share = othersSum > 0 ? Math.max(0, base[i] ?? 0) / othersSum : 1 / (n - 1);
+    const exact = share * remaining;
+    floors[i] = Math.floor(exact);
+    fracs[i] = exact - floors[i];
+    assigned += floors[i];
+  }
+  let left = remaining - assigned;
+  while (left > 0) {
+    let best = -1;
+    for (let i = 0; i < n; i++) {
+      if (i !== index && (best < 0 || fracs[i] > fracs[best])) best = i;
+    }
+    floors[best] += 1;
+    fracs[best] = -1;
+    left -= 1;
+  }
+  floors[index] = targetPct;
+  const out = new Array<number>(n);
+  for (let i = 0; i < n; i++) out[i] = floors[i] / 100;
+  return out;
 }
 
 function getSideMeta(leg: SandwichLeg) {
@@ -3330,7 +3354,6 @@ function ComposerLegRow({
   ratios,
   liveRatios,
   setLiveRatios,
-  pinned,
   initialPct,
   trackWidth,
   onRemove,
@@ -3343,9 +3366,6 @@ function ComposerLegRow({
   ratios: SharedValue<number[]>;
   liveRatios: number[];
   setLiveRatios: React.Dispatch<React.SetStateAction<number[]>>;
-  // Which legs have already been explicitly set by the user and should be
-  // avoided as another leg's auto-adjusted counterpart.
-  pinned: SharedValue<boolean[]>;
   // Fair (largest-remainder) whole-percent value for this leg's very first
   // paint, computed across all legs so every row's label sums to exactly 100.
   initialPct: number;
@@ -3370,90 +3390,38 @@ function ComposerLegRow({
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
   }, []);
 
-  // The single other leg that absorbs this leg's change, picked once per
-  // drag (the other leg with the most room — largest current share) and held
-  // fixed for the whole gesture so it doesn't jump between legs mid-drag.
-  const counterpartIndex = useSharedValue(-1);
-  const nativeCounterpart = useRef(-1);
+  // The split when the current drag began. Every update rescales the other
+  // legs from this snapshot (see {@link redistributeFromBase}), so the dragged
+  // leg can travel the full 0–100% and every other leg follows it.
+  const dragBase = useSharedValue<number[] | null>(null);
+  const nativeBase = useRef<number[] | null>(null);
   const nativeDirty = useRef(false);
-  const nativeAllowedMax = Math.min(1,
-    (liveRatios[index] ?? 0) +
-      (liveRatios[nativeCounterpart.current >= 0
-        ? nativeCounterpart.current
-        : largestOtherLeg(liveRatios, index)] ?? 0));
 
   const commitNativeRatio = useCallback(() => {
-    if (!nativeDirty.current) {
-      nativeCounterpart.current = -1;
-      return;
-    }
+    nativeBase.current = null;
+    if (!nativeDirty.current) return;
     nativeDirty.current = false;
-    nativeCounterpart.current = -1;
     onCommitRatios(ratios.value.slice());
   }, [onCommitRatios, ratios]);
 
   // SwiftUI owns the thumb while a finger is down. Keep the live split in the
-  // shared array; only the completed split is sent through React/the draft.
+  // shared array + React state (so the OTHER native sliders move with it);
+  // only the completed split is sent through to the draft.
   const adjustNativeRatio = (target: number) => {
-    const arr = ratios.value.slice();
-    if (arr.length < 2) return;
-    let counterpart = nativeCounterpart.current;
-    if (counterpart < 0 || counterpart === index) {
-      counterpart = largestOtherLeg(arr, index);
-      nativeCounterpart.current = counterpart;
-    }
-    const targetPct = Math.round(Math.max(0, Math.min(1, target)) * 100);
-    const currentPct = Math.round(arr[index] * 100);
-    const delta = targetPct - currentPct;
-    if (delta === 0) return;
-    const counterpartPct = Math.round(arr[counterpart] * 100);
-    const nextCounterpartPct = Math.max(0, Math.min(100, counterpartPct - delta));
-    const actualDelta = counterpartPct - nextCounterpartPct;
-    if (actualDelta === 0) return;
-    arr[index] = (currentPct + actualDelta) / 100;
-    arr[counterpart] = nextCounterpartPct / 100;
-    ratios.value = arr;
-    setLiveRatios(arr);
+    if (ratios.value.length < 2) return;
+    if (!nativeBase.current) nativeBase.current = ratios.value.slice();
+    const next = redistributeFromBase(nativeBase.current, index, target);
+    if (next.every((r, i) => r === ratios.value[i])) return;
+    ratios.value = next;
+    setLiveRatios(next);
     nativeDirty.current = true;
   };
 
-  // Move THIS leg to `target` and take the exact opposite change out of (or
-  // give it to) exactly ONE counterpart leg — every other leg stays
-  // completely untouched. Values are kept to whole percentage points (not
-  // fractional/pixel-precision ratios) so the numbers always read clean.
-  // Dragging stops at the boundary once the counterpart hits 0% or 100%
-  // rather than spilling the remainder into a third leg.
-  const adjustWithCounterpart = (target: number) => {
+  const adjustFromDrag = (target: number) => {
     "worklet";
-    const arr = ratios.value.slice();
-    const n = arr.length;
-    if (n === 0) return;
-    if (n === 1) {
-      arr[0] = 1;
-      ratios.value = arr;
-      return;
-    }
-
-    let counterpart = counterpartIndex.value;
-    if (counterpart < 0 || counterpart === index) {
-      counterpart = largestOtherLeg(arr, index);
-      counterpartIndex.value = counterpart;
-    }
-    if (counterpart < 0) return;
-
-    const clamped = Math.max(0, Math.min(1, target));
-    const targetPct = Math.round(clamped * 100);
-    const currentPct = Math.round(arr[index] * 100);
-    const delta = targetPct - currentPct;
-    if (delta === 0) return;
-
-    const counterpartPct = Math.round(arr[counterpart] * 100);
-    const newCounterpartPct = Math.max(0, Math.min(100, counterpartPct - delta));
-    const actualDelta = counterpartPct - newCounterpartPct;
-
-    arr[index] = (currentPct + actualDelta) / 100;
-    arr[counterpart] = newCounterpartPct / 100;
-    ratios.value = arr;
+    if (ratios.value.length < 2) return;
+    if (!dragBase.value) dragBase.value = ratios.value.slice();
+    ratios.value = redistributeFromBase(dragBase.value, index, target);
   };
 
   const pan = Gesture.Pan()
@@ -3461,16 +3429,16 @@ function ComposerLegRow({
     .activeOffsetX([-4, 4])
     .failOffsetY([-8, 8])
     .onStart((e) => {
-      counterpartIndex.value = -1;
+      dragBase.value = ratios.value.slice();
       lastHapticBucket.value = -1;
       if (trackWidth.value <= SLIDER_THUMB_DIAM) return;
-      adjustWithCounterpart((e.x - SLIDER_THUMB_R) / (trackWidth.value - SLIDER_THUMB_DIAM));
+      adjustFromDrag((e.x - SLIDER_THUMB_R) / (trackWidth.value - SLIDER_THUMB_DIAM));
     })
     .onUpdate((e) => {
       if (trackWidth.value <= SLIDER_THUMB_DIAM) return;
       const newRatio = Math.max(0, Math.min(1,
         (e.x - SLIDER_THUMB_R) / (trackWidth.value - SLIDER_THUMB_DIAM)));
-      adjustWithCounterpart(newRatio);
+      adjustFromDrag(newRatio);
 
       // Fine, continuous haptic texture instead of coarse 25% detents: a light
       // selection tick every ~5% reads as a smooth dial rather than checkpoints.
@@ -3483,11 +3451,7 @@ function ComposerLegRow({
       }
     })
     .onEnd(() => {
-      // The leg the user just set holds its value on future drags of other
-      // legs, until "even split" or the leg set changes.
-      const nextPinned = pinned.value.slice();
-      nextPinned[index] = true;
-      pinned.value = nextPinned;
+      dragBase.value = null;
       // Push the final distribution into React state exactly once.
       runOnJS(onCommitRatios)(ratios.value);
     });
@@ -3588,12 +3552,11 @@ function ComposerLegRow({
                 value={liveRatios[index] ?? initialPct / 100}
                 min={0}
                 max={1}
-                allowedMax={nativeAllowedMax}
                 color={colors.actionPrimary}
                 onValueChange={adjustNativeRatio}
                 onEditingChange={(editing, value) => {
                   if (editing) {
-                    nativeCounterpart.current = largestOtherLeg(ratios.value, index);
+                    nativeBase.current = ratios.value.slice();
                   } else {
                     adjustNativeRatio(value);
                     commitNativeRatio();
@@ -8274,6 +8237,23 @@ const makeStyles = (c: ThemeColors) => {
     paddingHorizontal: 18,
     paddingTop: 8,
     paddingBottom: 2,
+  },
+  previewPaywallNotice: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 7,
+    paddingHorizontal: 11,
+    paddingVertical: 9,
+    borderRadius: 12,
+    backgroundColor: c.surfaceAlt,
+  },
+  previewPaywallNoticeText: {
+    flex: 1,
+    color: c.textSecondary,
+    fontSize: 11,
+    lineHeight: 15,
+    fontWeight: "700",
+    fontFamily: F,
   },
   perpPickerNotice: {
     flexDirection: "row",

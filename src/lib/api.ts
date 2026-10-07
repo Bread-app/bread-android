@@ -2015,6 +2015,13 @@ export async function uploadAvatar(privyUserId: string, imageUri: string): Promi
  */
 export type SandwichDraft = Sandwich;
 
+/**
+ * Warning the backend adds when the source was only the free preview of a
+ * paywalled article. Must match PAYWALLED_ARTICLE_WARNING in stock-backend's
+ * lib/server/article.ts — the composer preview keys its banner off it.
+ */
+export const PAYWALLED_ARTICLE_WARNING = 'Built from the free preview of a paywalled article.';
+
 export type ManualSandwichInput = {
   name: string;
   summary: string;
@@ -2234,7 +2241,13 @@ export async function createSandwichFromInput(
       elapsedMs: Date.now() - sourceStartedAt,
     });
 
-    onStage?.('Researching the market…');
+    // Paywalled article: only its free preview was readable, so say that
+    // during the wait instead of implying the whole piece was analyzed.
+    const researchStage =
+      sourcePayload.paywalled === true
+        ? 'Paywalled post — working from the free preview…'
+        : 'Researching the market…';
+    onStage?.(researchStage);
 
     // One call does analyze + build. The split between them was never a
     // checkpoint for typed text or an X post — we always built immediately —
@@ -2254,7 +2267,7 @@ export async function createSandwichFromInput(
     // Compose declined or was lost. Its stage hint may have already advanced
     // the label to "Building…", so put it back before the two-step path starts
     // over at research.
-    onStage?.('Researching the market…');
+    onStage?.(researchStage);
     const analysisStartedAt = Date.now();
     const analysisPayload = await analyzeSourceWithResume(sourcePayload.source.id, onStage);
 
