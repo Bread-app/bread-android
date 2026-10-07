@@ -993,13 +993,17 @@ export const SandwichCard = React.memo(function SandwichCard({
 
               {/* Engagement spread across the row, the return closing it. */}
               <View style={styles.holdingActionsRow}>
-                {actionButtons}
-                <Text
-                  numberOfLines={1}
-                  style={[styles.holdingReturn, { color: pnlColor(pnl, colors) }]}
-                >
-                  {hasPnl ? `${pnl! < 0 ? "\u25BC" : "\u25B2"} ${formatCardPnl(pnl).replace(/^[+-]/, "")}` : "--"}
-                </Text>
+                <View style={styles.engagementGroup}>{actionButtons}</View>
+                <View style={styles.engagementReturn}>
+                  <Text
+                    numberOfLines={1}
+                    adjustsFontSizeToFit
+                    minimumFontScale={0.8}
+                    style={[styles.holdingReturn, { color: pnlColor(pnl, colors) }]}
+                  >
+                    {hasPnl ? `${pnl! < 0 ? "\u25BC" : "\u25B2"} ${formatCardPnl(pnl).replace(/^[+-]/, "")}` : "--"}
+                  </Text>
+                </View>
               </View>
             </View>
           </View>
@@ -1363,8 +1367,6 @@ export const PodcastGroupCard = React.memo(function PodcastGroupCard({
   const creator = primary ? getCreatorMeta(primary) : null;
   const handle = video.channelHandle ?? video.channelName ?? creator?.name ?? "YouTube";
   const router = useRouter();
-  const composer = useOptionalSandwichComposer();
-  const detail = useOptionalSandwichDetail();
   const creatorPrivyUserId = creator ? primary?.source.user?.privyUserId ?? null : null;
 
   if (!primary) return null;
@@ -1441,7 +1443,8 @@ export const PodcastGroupCard = React.memo(function PodcastGroupCard({
             onPress={handleOpenGroup}
           />
 
-          <View style={styles.cardActionsRow}>
+          <View style={styles.holdingActionsRow}>
+            <View style={styles.engagementGroup}>
             <PressableScale
               accessibilityRole="button"
               accessibilityLabel={liked ? "Unlike episode" : "Like episode"}
@@ -1462,29 +1465,6 @@ export const PodcastGroupCard = React.memo(function PodcastGroupCard({
                 </Text>
               </View>
             </PressableScale>
-            {/* Same remix slot as the post card, so both rows line up; it
-                remixes the episode's lead market. */}
-            {composer ? (
-              <PressableScale
-                accessibilityRole="button"
-                accessibilityLabel="Remix sandwich"
-                accessibilityHint="Opens this episode's lead market in the composer to change and publish as your own"
-                onPress={(event) => {
-                  event.stopPropagation();
-                  void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                  composer.open({
-                    remixOf: primary,
-                    onCreated: (created) => {
-                      toast.showToast("Your remix is live", "success");
-                      detail?.open(created);
-                    },
-                  });
-                }}
-                style={styles.cardActionButton}
-              >
-                <RemixIcon size={20} color={colors.textSecondary} />
-              </PressableScale>
-            ) : null}
             {POST_COMMENTS_ENABLED ? (
               <PressableScale
                 accessibilityRole="button"
@@ -1547,24 +1527,29 @@ export const PodcastGroupCard = React.memo(function PodcastGroupCard({
               <ShareIcon size={20} color={colors.textSecondary} />
             </PressableScale>
 
-            {iconLegs.length > 0 || pnlPct != null ? (
-              <View style={styles.cardAssetPnlPill}>
-                <CardAssetIcons legs={iconLegs} />
-                {pnlPct != null ? (
-                  <Text
-                    numberOfLines={1}
-                    style={[styles.cardPnlInline, { color: pnlColor(pnlPct, colors) }]}
-                  >
-                    {formatCardPnl(pnlPct)}
-                    {/* Say so when part of the episode has no price at all, so
-                        "best" is not read as best of everything. */}
-                    {partialCoverage ? (
-                      <Text style={styles.cardPnlCoverage}>{` ${counted}/${total}`}</Text>
-                    ) : null}
-                  </Text>
+            </View>
+
+            {/* The X post row's closing return, led by the episode's assets.
+                It fills what the fixed engagement group leaves, so the icons
+                land at the same x on both kinds of post. */}
+            <View style={styles.engagementReturn}>
+              <CardAssetIcons legs={iconLegs} />
+              <Text
+                numberOfLines={1}
+                adjustsFontSizeToFit
+                minimumFontScale={0.8}
+                style={[styles.holdingReturn, { color: pnlColor(pnlPct, colors) }]}
+              >
+                {pnlPct != null
+                  ? `${pnlPct < 0 ? "\u25BC" : "\u25B2"} ${formatCardPnl(pnlPct).replace(/^[+-]/, "")}`
+                  : "--"}
+                {/* Say so when part of the episode has no price at all, so
+                    "best" is not read as best of everything. */}
+                {pnlPct != null && partialCoverage ? (
+                  <Text style={styles.cardPnlCoverage}>{` ${counted}/${total}`}</Text>
                 ) : null}
-              </View>
-            ) : null}
+              </Text>
+            </View>
           </View>
         </View>
       </View>
@@ -1659,6 +1644,23 @@ const makeStyles = (c: ThemeColors) => StyleSheet.create({
   },
   // Rubik, the app's figure face. The weight lives in the font file, so no
   // fontWeight — pairing one with a custom family can fall back to the system face.
+  // Feed rows (X posts and YouTube episodes) give the engagement icons a fixed
+  // share of the row, so their spacing never depends on how wide the return
+  // beside them is — the icons line up exactly from post to post.
+  engagementGroup: {
+    width: "52%",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  engagementReturn: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "flex-end",
+    gap: 6,
+    marginLeft: 8,
+  },
   holdingReturn: {
     fontSize: 15,
     fontFamily: F_DISPLAY_MEDIUM,
