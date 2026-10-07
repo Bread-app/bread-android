@@ -1,4 +1,4 @@
-import { usePrivy } from "@privy-io/expo";
+import { useEmbeddedSolanaWallet, usePrivy } from "@privy-io/expo";
 import * as Haptics from "expo-haptics";
 import { useRouter } from "expo-router";
 import React, {
@@ -14,6 +14,7 @@ import React, {
 import {
   appUserPayloadFromPrivyUser,
   getSandwichById,
+  getUserPortfolio,
   setCardLike,
   type AppUserPayload,
   type Sandwich,
@@ -25,7 +26,11 @@ import {
   SandwichShareSheet,
   type SandwichShareSheetRef,
 } from "@/components/sandwich-share-sheet";
-import type { SandwichPosition } from "@/lib/sandwich-positions";
+import {
+  getStoredSandwichPositions,
+  seedFromBackend,
+  type SandwichPosition,
+} from "@/lib/sandwich-positions";
 import type { ToastState } from "@/lib/toast-state";
 import {
   NATIVE_ZOOM_SPIKE,
@@ -147,6 +152,13 @@ export function SandwichDetailProvider({
   const onUpdatedRef = useRef<OpenOptions["onUpdated"]>(undefined);
   const [sandwich, setSandwich] = useState<Sandwich | null>(null);
   const [position, setPosition] = useState<SandwichPosition | null>(null);
+  const walletAddress = useEmbeddedSolanaWallet().wallets?.[0]?.address ?? null;
+  // The sandwich id whose `position` is already settled — handed in by the
+  // opener, looked up below, or set by a buy/sell. Guards the lookup from
+  // resurrecting a position a full sell just cleared.
+  const positionSettledForRef = useRef<string | null>(null);
+  // Bumped by every open(), so reopening the SAME sandwich re-runs the lookup.
+  const [openCount, setOpenCount] = useState(0);
   const [viewedPosition, setViewedPosition] = useState<ViewedPosition | null>(null);
   const [anonymousId, setAnonymousId] = useState<string | null>(null);
   // Every sandwich this provider has shown, by id. Popping back to an earlier
@@ -184,6 +196,7 @@ export function SandwichDetailProvider({
     setSandwich(null);
     setPosition(null);
     setViewedPosition(null);
+    positionSettledForRef.current = null;
     seenRef.current.clear();
     onUpdatedRef.current = undefined;
   }, [appUser?.privyUserId]);
@@ -236,6 +249,8 @@ export function SandwichDetailProvider({
       remember(next);
       setSandwich(next);
       setPosition(options?.position ?? null);
+      positionSettledForRef.current = options?.position ? next.id : null;
+      setOpenCount((count) => count + 1);
       setViewedPosition(options?.viewedPosition ?? null);
       // `id` rides along purely as a recovery key. The context above is still
       // the fast path — this is what lets the screen refetch itself when it is
@@ -352,8 +367,47 @@ export function SandwichDetailProvider({
   }, [applyUpdate, sandwich]);
 
   const updatePosition = useCallback((nextPosition: SandwichPosition | null) => {
+    positionSettledForRef.current = nextPosition?.sandwichId ?? sandwich?.id ?? null;
     setPosition(nextPosition);
-  }, []);
+  }, [sandwich?.id]);
+
+  // Only the Holdings card used to hand the detail a position, so a sandwich
+  // reached any other way — the Like-to-Buy "You're in" push, the feed, search —
+  // showed Buy and never Sell. A server-side auto-buy also never touches this
+  // device's store, so its legs were reachable only as single stocks, whose sell
+  // correctly refuses ("held in a Sandwich"). Resolve the viewer's own position
+  // here: the device store first, then the server's record of the buy.
+  const sandwichId = sandwich?.id ?? null;
+  const privyUserId = appUser?.privyUserId ?? null;
+  useEffect(() => {
+    if (!sandwichId || !walletAddress) return;
+    if (positionSettledForRef.current === sandwichId) return;
+    positionSettledForRef.current = sandwichId;
+    let cancelled = false;
+    let done = false;
+    void (async () => {
+      const stored = await getStoredSandwichPositions(walletAddress).catch(() => []);
+      let found = stored.find((row) => row.sandwichId === sandwichId) ?? null;
+      if (!found && privyUserId) {
+        const backend = await getUserPortfolio(privyUserId).catch(() => null);
+        if (backend?.some((row) => row.sandwichId === sandwichId)) {
+          const merged = await seedFromBackend(walletAddress, backend).catch(() => null);
+          found = merged?.find((row) => row.sandwichId === sandwichId) ?? null;
+        }
+      }
+      done = true;
+      if (cancelled || !found) return;
+      // A buy or sell on this screen may have settled it while we were reading.
+      setPosition((current) => current ?? found);
+    })();
+    return () => {
+      cancelled = true;
+      // Interrupted mid-read: unsettle so the next run retries.
+      if (!done && positionSettledForRef.current === sandwichId) {
+        positionSettledForRef.current = null;
+      }
+    };
+  }, [openCount, privyUserId, sandwichId, walletAddress]);
 
   // present() must run synchronously from the tap that calls share(); keep sync.
   const share = useCallback(() => {
