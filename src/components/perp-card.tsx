@@ -9,6 +9,8 @@ import {
   cardStyles,
 } from "@/components/balance-card-shell";
 import { PressableScale } from '@/components/pressable-scale';
+import { HyperliquidLogo } from '@/components/hyperliquid-logo';
+import type { PerpsVenue } from '@/lib/perps-venue';
 
 const F = Fonts.rounded;
 
@@ -16,7 +18,7 @@ const POSITIVE = "#02ED45";
 const NEGATIVE = "#D2042D";
 
 export type PerpCardSummary = {
-  /** False when the wallet has never registered a Phoenix trader. */
+  /** False until the venue's trading account exists. */
   registered: boolean;
   /** Collateral + unrealized PnL, i.e. what the perps account is worth. */
   portfolioValue: number;
@@ -28,6 +30,7 @@ export type PerpCardSummary = {
 };
 
 type PerpCardProps = {
+  venue?: PerpsVenue;
   /** Null while loading or when the account view could not be read. */
   summary: PerpCardSummary | null;
   loading?: boolean;
@@ -66,6 +69,7 @@ function signedUsd(value: number): string {
  * an explicit tap; nothing here funds a position implicitly.
  */
 export function PerpCard({
+  venue = 'phoenix',
   summary,
   loading = false,
   flipped,
@@ -74,6 +78,8 @@ export function PerpCard({
   onWithdraw,
   onActivate,
 }: PerpCardProps) {
+  const isHyperliquid = venue === 'hyperliquid';
+  const accountName = isHyperliquid ? 'Hyperliquid' : 'Perps';
   const [selfFlipped, setSelfFlipped] = useState(false);
   const isFlipped = flipped ?? selfFlipped;
 
@@ -97,10 +103,10 @@ export function PerpCard({
 
   const subtitle = !summary
     ? loading
-      ? "Reading your perps account"
-      : "Perps account unavailable"
+      ? `Reading your ${accountName.toLowerCase()} account`
+      : `${accountName} account unavailable`
     : !summary.registered
-      ? "Perps not activated yet"
+      ? `${accountName} not activated yet`
       : `${summary.positionCount} open ${summary.positionCount === 1 ? "position" : "positions"}`;
 
   const pnl = summary?.registered ? summary.unrealizedPnl : null;
@@ -109,18 +115,23 @@ export function PerpCard({
     <FlipCard
       flipped={isFlipped}
       onPress={handlePress}
-      frontColors={["#33333A", "#17171B", "#08080A"]}
-      backColors={["#08080A", "#17171B", "#33333A"]}
-      textured
+      frontColors={isHyperliquid ? ["#183F38", "#0C2622", "#061713"] : ["#33333A", "#17171B", "#08080A"]}
+      backColors={isHyperliquid ? ["#061713", "#0C2622", "#183F38"] : ["#08080A", "#17171B", "#33333A"]}
+      textured={!isHyperliquid}
       textureOpacity={0.16}
       front={
         <>
-          <Text style={[cardStyles.label, styles.label]}>PERPS BALANCE</Text>
+          <View style={styles.brandRow}>
+            {isHyperliquid ? <HyperliquidLogo size={24} /> : null}
+            <Text style={[cardStyles.label, styles.label, isHyperliquid && styles.hyperliquidLabel]}>
+              {isHyperliquid ? 'HYPERLIQUID' : 'PERPS BALANCE'}
+            </Text>
+          </View>
           <GradientBalance
             label={balanceLabel}
             loading={balanceLoading}
             skeletonColor="rgba(255,255,255,0.18)"
-            colors={["rgba(255,255,255,0.98)", "rgba(255,255,255,0.6)"]}
+            colors={isHyperliquid ? ["#C8FFF0", "#97FCE4"] : ["rgba(255,255,255,0.98)", "rgba(255,255,255,0.6)"]}
             locations={[0.226, 1]}
           />
           <View style={styles.subtitleRow}>
@@ -142,7 +153,9 @@ export function PerpCard({
         <>
           <View style={styles.backStripe} />
           <View style={styles.backContent}>
-            <Text style={[cardStyles.backLabel, styles.backLabel]}>PERPS ACCOUNT</Text>
+            <Text style={[cardStyles.backLabel, styles.backLabel, isHyperliquid && styles.hyperliquidLabel]}>
+              {isHyperliquid ? 'HYPERLIQUID ACCOUNT' : 'PERPS ACCOUNT'}
+            </Text>
             {summary?.registered ? (
               <>
                 <BackRow label="Collateral" value={usd(summary.collateral)} />
@@ -159,8 +172,8 @@ export function PerpCard({
                   }
                 />
                 <BackRow
-                  label="Positions / orders"
-                  value={`${summary.positionCount} / ${summary.openOrderCount}`}
+                  label={isHyperliquid ? 'Open positions' : 'Positions / orders'}
+                  value={isHyperliquid ? `${summary.positionCount}` : `${summary.positionCount} / ${summary.openOrderCount}`}
                 />
                 {onAddCash || onWithdraw ? (
                   <View style={styles.actionRow}>
@@ -184,12 +197,14 @@ export function PerpCard({
               <>
                 <Text style={styles.backNote}>
                   {loading
-                    ? "Checking your perps account…"
-                    : "Activate perps to trade with leverage and go short."}
+                    ? `Checking your ${accountName.toLowerCase()} account…`
+                    : !summary
+                      ? 'Balance unavailable. Pull to refresh to try again.'
+                      : `Activate ${accountName.toLowerCase()} to trade with leverage and go short.`}
                 </Text>
-                {!loading && onActivate ? (
+                {!loading && summary && onActivate ? (
                   <View style={styles.actionRow}>
-                    <CardButton label="Activate perps" onPress={onActivate} />
+                    <CardButton label={`Activate ${accountName}`} onPress={onActivate} />
                   </View>
                 ) : null}
               </>
@@ -253,6 +268,14 @@ function BackRow({
 }
 
 const styles = StyleSheet.create({
+  brandRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  hyperliquidLabel: {
+    color: '#97FCE4',
+  },
   label: {
     color: "rgba(255,255,255,0.6)",
   },

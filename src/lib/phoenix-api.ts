@@ -7,6 +7,13 @@
  */
 
 import { getAuthHeaders } from '@/lib/api';
+import { getHyperliquidCandles, listHyperliquidMarkets } from '@/lib/hyperliquid-api';
+import {
+  hyperliquidChangePercent,
+  hyperliquidCoinFromPerpSymbol,
+  isHyperliquidPerpSymbol,
+  toPerpMarketDetail,
+} from '@/lib/hyperliquid-perp-market';
 import { isDemoMode } from '@/lib/demo/demo-config';
 import {
   inferPhoenixPositionLeverage,
@@ -228,6 +235,13 @@ export type PhoenixMarketStats = {
 };
 
 export async function getPhoenixMarket(symbol: string): Promise<PhoenixMarketDetail> {
+  // A Hyperliquid market presented through this screen — see hyperliquid-perp-market.
+  if (isHyperliquidPerpSymbol(symbol)) {
+    const coin = hyperliquidCoinFromPerpSymbol(symbol);
+    const market = (await listHyperliquidMarkets()).find((entry) => entry.coin === coin);
+    if (!market) throw new PhoenixApiError(404, 'market_not_found', `${coin} isn't listed on Hyperliquid.`);
+    return toPerpMarketDetail(market);
+  }
   return phoenixGet<PhoenixMarketDetail>(`/markets/${encodeURIComponent(symbol)}`);
 }
 
@@ -236,6 +250,9 @@ export async function getPhoenixCandles(
   timeframe: PhoenixTimeframe,
   limit = 120,
 ): Promise<PhoenixCandle[]> {
+  if (isHyperliquidPerpSymbol(symbol)) {
+    return getHyperliquidCandles(hyperliquidCoinFromPerpSymbol(symbol), timeframe, limit);
+  }
   const { candles } = await phoenixGet<{ candles: PhoenixCandle[] }>(
     `/candles/${encodeURIComponent(symbol)}?timeframe=${timeframe}&limit=${limit}`,
   );
@@ -257,6 +274,35 @@ export type PhoenixPriceBatch = {
  * board cannot be priced at once. Callers price what is on screen.
  */
 export async function getPhoenixPrices(symbols: string[]): Promise<PhoenixPriceBatch> {
+  // Hyperliquid symbols are priced from one catalog read; case is significant
+  // in their coin names, so they're split off before the upper-casing below.
+  const hyperliquid = symbols.filter(isHyperliquidPerpSymbol);
+  if (hyperliquid.length > 0) {
+    const markets = await listHyperliquidMarkets();
+    const byCoin = new Map(markets.map((market) => [market.coin, market]));
+    const prices: Record<string, number | null> = {};
+    const changes: Record<string, PhoenixChange24h | null> = {};
+    const failed: string[] = [];
+    for (const symbol of hyperliquid) {
+      const market = byCoin.get(hyperliquidCoinFromPerpSymbol(symbol));
+      if (!market) {
+        failed.push(symbol);
+        continue;
+      }
+      prices[symbol] = market.markPx;
+      const changePercent = hyperliquidChangePercent(market);
+      changes[symbol] =
+        changePercent === null ? null : { changeUsd: market.markPx - market.prevDayPx, changePercent };
+    }
+    const rest = symbols.filter((symbol) => !isHyperliquidPerpSymbol(symbol));
+    if (rest.length === 0) return { prices, failed, changes };
+    const phoenix = await getPhoenixPrices(rest);
+    return {
+      prices: { ...phoenix.prices, ...prices },
+      failed: [...phoenix.failed, ...failed],
+      changes: { ...(phoenix.changes ?? {}), ...changes },
+    };
+  }
   const unique = [...new Set(symbols.map((symbol) => symbol.trim().toUpperCase()).filter(Boolean))];
   if (unique.length === 0) return { prices: {}, failed: [] };
 
@@ -508,8 +554,11 @@ export type PhoenixWithdrawBuild = PhoenixBuiltTransaction & {
  * margin behind an open position is not moveable, and the backend rejects an
  * attempt rather than trusting the client's arithmetic.
  */
-export async function buildPhoenixWithdraw(amountUsd: string): Promise<PhoenixWithdrawBuild> {
-  return phoenixPost<PhoenixWithdrawBuild>('/collateral/withdraw/build', { amountUsd });
+export async function buildPhoenixWithdraw(amountUsd: string, options?: { all?: boolean }): Promise<PhoenixWithdrawBuild> {
+  return phoenixPost<PhoenixWithdrawBuild>(
+    '/collateral/withdraw/build',
+    options?.all ? { all: true } : { amountUsd },
+  );
 }
 
 export type PhoenixTradeSide = 'long' | 'short';

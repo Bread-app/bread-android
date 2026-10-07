@@ -34,6 +34,16 @@ import {
 import { useStockDetail } from "@/lib/stock-detail-store";
 import type { ZoomSourceRect } from "@/lib/zoom-transition";
 import { PhoenixMarketCard } from "@/components/phoenix-market-card";
+import { HyperliquidLogo } from "@/components/hyperliquid-logo";
+import { HyperliquidMarketCard } from "@/components/hyperliquid-market-card";
+import { listHyperliquidMarkets, type HyperliquidMarket } from "@/lib/hyperliquid-api";
+import {
+  deepestHyperliquidMarkets,
+  hyperliquidPerpOnlyStock,
+  phoenixPerpOnlyStock,
+  toPerpMarket,
+} from "@/lib/hyperliquid-perp-market";
+import { PERPS_VENUE } from "@/lib/perps-venue";
 import { usePhoenixMarkets, usePhoenixRotatingPrices } from "@/hooks/use-phoenix-live";
 import {
   findPhoenixMarketForAsset,
@@ -83,8 +93,8 @@ type DiscoveryTile = {
   onPress: () => void;
 };
 
-type BrowseCategoryKey = "stocks" | "private" | "crypto" | "perps" | "metals";
-type MarketBrowseCategoryKey = Exclude<BrowseCategoryKey, "perps">;
+type BrowseCategoryKey = "stocks" | "private" | "crypto" | "perps" | "metals" | "hyperliquid";
+type MarketBrowseCategoryKey = Exclude<BrowseCategoryKey, "perps" | "hyperliquid">;
 
 const BROWSE_CATEGORY_FILTERS: Record<MarketBrowseCategoryKey, AssetFilter> = {
   stocks: "stocks",
@@ -98,6 +108,9 @@ const BROWSE_CATEGORY_ORDER: BrowseCategoryKey[] = [
   "private",
   "crypto",
   "metals",
+  // Every USDC-margined Hyperliquid market. Only in builds that trade perps on
+  // Hyperliquid — elsewhere these rows would open a market the app can't trade.
+  ...(PERPS_VENUE === "hyperliquid" ? (["hyperliquid"] as const) : []),
 ];
 
 /**
@@ -111,12 +124,16 @@ const BROWSE_CATEGORY_PERP_KIND: Partial<
   crypto: "crypto",
 };
 
+/** Hyperliquid rows rendered per page; see the tab's "Show more". */
+const HYPERLIQUID_PAGE = 50;
+
 const BROWSE_CATEGORY_TITLES: Record<BrowseCategoryKey, string> = {
   stocks: "Stocks",
   private: "Private",
   crypto: "Crypto",
   perps: "Perps",
   metals: "Metals",
+  hyperliquid: "Hyperliquid",
 };
 
 type SearchResultsProps = {
@@ -247,14 +264,23 @@ function AssetCategoryShelf({
               onPress={() => onSelect(key)}
               hitSlop={8}
             >
-              <Text
-                style={[
-                  styles.assetCategoryTab,
-                  selected && styles.assetCategoryTabSelected,
-                ]}
-              >
-                {BROWSE_CATEGORY_TITLES[key]}
-              </Text>
+              <View style={styles.assetCategoryLabel}>
+                {key === "hyperliquid" ? (
+                  // The venue's mark leads its tab. Dimmed with the label when
+                  // the tab isn't selected, so it never outshouts the active one.
+                  <View style={!selected && styles.assetCategoryLogoIdle}>
+                    <HyperliquidLogo size={20} />
+                  </View>
+                ) : null}
+                <Text
+                  style={[
+                    styles.assetCategoryTab,
+                    selected && styles.assetCategoryTabSelected,
+                  ]}
+                >
+                  {BROWSE_CATEGORY_TITLES[key]}
+                </Text>
+              </View>
             </PressableScale>
           );
         })}
@@ -291,6 +317,10 @@ export function SearchResults({
   const [categoryErrors, setCategoryErrors] = useState<
     Partial<Record<MarketBrowseCategoryKey, string>>
   >({});
+  const [hyperliquidMarkets, setHyperliquidMarkets] = useState<HyperliquidMarket[] | null>(null);
+  const [hyperliquidLoading, setHyperliquidLoading] = useState(false);
+  const [hyperliquidError, setHyperliquidError] = useState<string | null>(null);
+  const [hyperliquidVisible, setHyperliquidVisible] = useState(HYPERLIQUID_PAGE);
   const [refreshing, setRefreshing] = useState(false);
   const followOverrideRef = useRef<Map<string, boolean>>(new Map());
   const [, forceFollowUpdate] = useState(0);
@@ -347,6 +377,19 @@ export function SearchResults({
       }));
     } finally {
       setCategoryLoading((current) => ({ ...current, [key]: false }));
+    }
+  }, []);
+
+  /** One row per ticker, busiest book first — the one an order routes to. */
+  const loadHyperliquidMarkets = useCallback(async () => {
+    setHyperliquidLoading(true);
+    setHyperliquidError(null);
+    try {
+      setHyperliquidMarkets(deepestHyperliquidMarkets(await listHyperliquidMarkets()));
+    } catch (error) {
+      setHyperliquidError(error instanceof Error ? error.message : "Couldn't load Hyperliquid.");
+    } finally {
+      setHyperliquidLoading(false);
     }
   }, []);
 
@@ -592,6 +635,34 @@ export function SearchResults({
   );
 
   /**
+   * Perp-only markets open the same full-screen asset route as a stock, landed
+   * on its perp side. The route is keyed on an asset, so they get a stand-in
+   * record that also tells it there's no spot side to toggle to.
+   */
+  const openHyperliquidMarket = useCallback(
+    (market: HyperliquidMarket, source: ZoomSourceRect | null) => {
+      openStockRoute(hyperliquidPerpOnlyStock(market), {
+        source,
+        perpMarket: toPerpMarket(market),
+        venue: "perp",
+        hideActions: true,
+      });
+    },
+    [openStockRoute],
+  );
+  const perpPricesRef = useRef<Record<string, number | null>>({});
+  const openPerpOnlyMarket = useCallback(
+    (market: PhoenixMarket) => {
+      openStockRoute(phoenixPerpOnlyStock(market, perpPricesRef.current[market.symbol] ?? null), {
+        perpMarket: market,
+        venue: "perp",
+        hideActions: true,
+      });
+    },
+    [openStockRoute],
+  );
+
+  /**
    * Perp rows for the query: every matching equity perp, plus the crypto perps
    * that have no spot twin among the asset hits (DOGE, XRP, LINK — tokens.xyz
    * does not list them, so without this they are unreachable from search).
@@ -622,7 +693,7 @@ export function SearchResults({
    * than the whole catalog, so a perp never appears twice on one screen.
    */
   const browsePerpOnly = useMemo(() => {
-    if (selectedBrowseCategory === "perps") return [];
+    if (selectedBrowseCategory === "perps" || selectedBrowseCategory === "hyperliquid") return [];
     const kind = BROWSE_CATEGORY_PERP_KIND[selectedBrowseCategory];
     const items = categoryLists[selectedBrowseCategory];
     if (!kind || items === undefined) return [];
@@ -644,6 +715,7 @@ export function SearchResults({
   );
   const { prices: perpPrices, changes: perpChanges } =
     usePhoenixRotatingPrices(pricedPerpSymbols);
+  perpPricesRef.current = perpPrices;
 
   const curatedBySandwichId = useMemo(
     () => new Map(curated.map((c) => [c.sandwichId, c])),
@@ -811,11 +883,15 @@ export function SearchResults({
   const handleSelectBrowseCategory = useCallback(
     (key: BrowseCategoryKey) => {
       setSelectedBrowseCategory(key);
+      if (key === "hyperliquid") {
+        if (hyperliquidMarkets === null) void loadHyperliquidMarkets();
+        return;
+      }
       if (key !== "perps" && categoryLists[key] === undefined) {
         void loadBrowseCategory(key);
       }
     },
-    [categoryLists, loadBrowseCategory],
+    [categoryLists, hyperliquidMarkets, loadBrowseCategory, loadHyperliquidMarkets],
   );
 
   const refreshDiscovery = useCallback(async () => {
@@ -838,7 +914,9 @@ export function SearchResults({
       setAssets([...merged.values()]);
       setSandwiches(publicSandwiches);
       setCurated(curatedItems);
-      if (selectedBrowseCategory !== "perps") {
+      if (selectedBrowseCategory === "hyperliquid") {
+        await loadHyperliquidMarkets();
+      } else if (selectedBrowseCategory !== "perps") {
         await loadBrowseCategory(selectedBrowseCategory);
       }
     } finally {
@@ -847,6 +925,7 @@ export function SearchResults({
   }, [
     curated,
     loadBrowseCategory,
+    loadHyperliquidMarkets,
     refreshPerpMarkets,
     sandwiches,
     selectedBrowseCategory,
@@ -969,6 +1048,55 @@ export function SearchResults({
 
   function renderBrowseCategory() {
     const key = selectedBrowseCategory;
+    if (key === "hyperliquid") {
+      return (
+        <View style={styles.browseListSection}>
+          {hyperliquidLoading && hyperliquidMarkets === null ? (
+            <LoadingStockList />
+          ) : hyperliquidError && hyperliquidMarkets === null ? (
+            <View style={styles.browseStateCard}>
+              <Ionicons name="cloud-offline-outline" size={32} color={colors.iconMuted} />
+              <Text style={styles.browseStateTitle}>Couldn&apos;t load Hyperliquid</Text>
+              <Text style={styles.browseStateBody}>{hyperliquidError}</Text>
+              <PressableScale
+                accessibilityRole="button"
+                accessibilityLabel="Retry Hyperliquid"
+                onPress={() => void loadHyperliquidMarkets()}
+                style={styles.browseRetryButton}
+              >
+                <Text style={styles.browseRetryText}>Try again</Text>
+              </PressableScale>
+            </View>
+          ) : (
+            <>
+              {(hyperliquidMarkets ?? []).slice(0, hyperliquidVisible).map((market) => (
+                <HyperliquidMarketCard
+                  key={market.coin}
+                  market={market}
+                  // The full-screen market, on the perp side; its data and orders
+                  // route to Hyperliquid by the market's `HL:` symbol.
+                  onPress={openHyperliquidMarket}
+                />
+              ))}
+              {(hyperliquidMarkets?.length ?? 0) > hyperliquidVisible ? (
+                // ~320 markets, each an SVG logo: render a page at a time rather
+                // than parsing every logo the moment the tab opens.
+                <PressableScale
+                  accessibilityRole="button"
+                  accessibilityLabel="Show more Hyperliquid markets"
+                  onPress={() => setHyperliquidVisible((count) => count + HYPERLIQUID_PAGE)}
+                  style={styles.browseRetryButton}
+                >
+                  <Text style={styles.browseRetryText}>
+                    Show more ({(hyperliquidMarkets?.length ?? 0) - hyperliquidVisible})
+                  </Text>
+                </PressableScale>
+              ) : null}
+            </>
+          )}
+        </View>
+      );
+    }
     if (key === "perps") {
       return (
         <View style={styles.browseListSection}>
@@ -1001,7 +1129,7 @@ export function SearchResults({
                 market={market}
                 price={perpPrices[market.symbol] ?? null}
                 change={perpChanges[market.symbol] ?? null}
-                onPress={(item) => stockSheetRef.current?.openPerp(item)}
+                onPress={openPerpOnlyMarket}
               />
             ))
           )}
@@ -1057,7 +1185,7 @@ export function SearchResults({
                 market={market}
                 price={perpPrices[market.symbol] ?? null}
                 change={perpChanges[market.symbol] ?? null}
-                onPress={(item) => stockSheetRef.current?.openPerp(item)}
+                onPress={openPerpOnlyMarket}
               />
             ))}
           </>
@@ -1248,7 +1376,7 @@ export function SearchResults({
                     market={market}
                     price={perpPrices[market.symbol] ?? null}
                     change={perpChanges[market.symbol] ?? null}
-                    onPress={(item) => stockSheetRef.current?.openPerp(item)}
+                    onPress={openPerpOnlyMarket}
                   />
                 ))}
               </>
@@ -1496,6 +1624,14 @@ const makeStyles = (c: ThemeColors) => StyleSheet.create({
   },
   assetCategoryTabSelected: {
     color: c.text,
+  },
+  assetCategoryLabel: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  assetCategoryLogoIdle: {
+    opacity: 0.55,
   },
   discoveryTilePerformance: {
     fontFamily: Fonts.displayMedium,

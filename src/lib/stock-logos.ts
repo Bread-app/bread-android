@@ -68,8 +68,10 @@ export function perpLogoSources(
   spotIcon?: string | null,
 ): { uri: string | null; fallbackUris: (string | null)[] } {
   const isCrypto = market.category === 'crypto';
-  const ticker = market.symbol.trim().toUpperCase();
-  const derived = isCrypto ? cryptoLogoUris(ticker) : [equityLogoUri(market.symbol)];
+  // A Hyperliquid market shown as a perp (`HL:xyz:NVDA`) is the ticker after its prefix.
+  const symbol = market.symbol.trim().replace(/^HL:(?:[a-z0-9]+:)?/i, '');
+  const ticker = symbol.toUpperCase();
+  const derived = isCrypto ? cryptoLogoUris(ticker) : [equityLogoUri(symbol)];
 
   const sources = [market.iconUri ?? null, spotIcon ?? null, ...derived, market.logoUri ?? null];
   const [uri, ...fallbackUris] = sources.filter((source, index) =>

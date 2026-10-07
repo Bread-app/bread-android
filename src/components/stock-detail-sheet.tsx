@@ -89,6 +89,7 @@ import { TradeAmountPad } from './trade-amount-sheet';
 import { GlassSheetSurface } from './glass-sheet-surface';
 import { TradeQuotePreviewRow } from './trade-quote-preview';
 import { useCash } from '@/hooks/use-cash';
+import { isPerpOnlyStock } from '@/lib/hyperliquid-perp-market';
 import { standaloneHolding, useSandwichLegReserve } from '@/lib/standalone-holding';
 import { useWalletStore } from '@/lib/wallet-store';
 import { AssetShareSheet, type AssetShareSheetRef } from './asset-share-sheet';
@@ -1303,6 +1304,8 @@ function StockDetailSheet({
   const activePerpMarket = selectedPerpMarket ?? matchedPerpMarket;
   const canToggleMarket = Boolean(
     stock &&
+      // A perp-only market's stand-in asset has no spot side to switch to.
+      !isPerpOnlyStock(stock) &&
       activePerpMarket &&
       phoenixMarketMatchesAsset(activePerpMarket, stock),
   );

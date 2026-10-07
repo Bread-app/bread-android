@@ -2,6 +2,18 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AppState } from 'react-native';
 
 import {
+  applyHyperliquidAssetCtx,
+  hyperliquidCoinFromPerpSymbol,
+  isHyperliquidPerpSymbol,
+  upsertHyperliquidCandle,
+} from '@/lib/hyperliquid-perp-market';
+import {
+  onHyperliquidStreamStatus,
+  subscribeHyperliquid,
+  type HyperliquidAssetCtxMessage,
+  type HyperliquidCandleMessage,
+} from '@/lib/hyperliquid-stream';
+import {
   getPhoenixCandles,
   getPhoenixMarket,
   getPhoenixPrices,
@@ -466,10 +478,49 @@ export function usePhoenixLiveMarket(
     }
   }, [symbol, timeframe]);
 
-  const refreshDetail = usePoll(detailTick, PRICE_POLL_MS, active);
+  // A Hyperliquid market streams instead of polling: its public WebSocket
+  // pushes the mark about once a second and the forming candle on every trade.
+  // REST still loads the history (the stream only sends the bar in progress)
+  // and takes over again whenever the socket is down.
+  const hyperliquidCoin = symbol && isHyperliquidPerpSymbol(symbol) ? hyperliquidCoinFromPerpSymbol(symbol) : null;
+  const [streamConnected, setStreamConnected] = useState(false);
+  useEffect(() => {
+    if (!hyperliquidCoin || !active) {
+      setStreamConnected(false);
+      return;
+    }
+    const offStatus = onHyperliquidStreamStatus(setStreamConnected);
+    const offCtx = subscribeHyperliquid({ type: 'activeAssetCtx', coin: hyperliquidCoin }, (data) => {
+      const ctx = (data as HyperliquidAssetCtxMessage).ctx;
+      setDetail((current) => (current ? applyHyperliquidAssetCtx(current, ctx) : current));
+    });
+    const offCandle = subscribeHyperliquid(
+      { type: 'candle', coin: hyperliquidCoin, interval: timeframe },
+      (data) => {
+        setCandles((current) =>
+          upsertHyperliquidCandle(current, data as HyperliquidCandleMessage, streamedCandle),
+        );
+      },
+    );
+    return () => {
+      offStatus();
+      offCtx();
+      offCandle();
+    };
+  }, [active, hyperliquidCoin, timeframe]);
+  const streaming = hyperliquidCoin !== null && streamConnected;
+
+  // Polls run until there's something to stream onto, then stand down while
+  // the socket is up; a dropped socket brings them straight back.
+  const refreshDetail = usePoll(detailTick, PRICE_POLL_MS, active && !(streaming && detail !== null));
   // Keyed on the timeframe: without it the loop keeps its old schedule and the
   // new series doesn't arrive until the next 15s tick.
-  const refreshCandles = usePoll(candleTick, CANDLE_POLL_MS, active, timeframe);
+  const refreshCandles = usePoll(
+    candleTick,
+    CANDLE_POLL_MS,
+    active && !(streaming && candles.length > 0),
+    timeframe,
+  );
 
   const refresh = useCallback(() => {
     refreshDetail();
@@ -477,6 +528,29 @@ export function usePhoenixLiveMarket(
   }, [refreshDetail, refreshCandles]);
 
   return { detail, candles, loading, error, candlesError, refresh };
+}
+
+/** A streamed Hyperliquid candle in the chart's shape (one price series, so mark = trade). */
+function streamedCandle(update: { t: number; o: string; h: string; l: string; c: string; v: string; n: number }): PhoenixCandle {
+  const open = Number(update.o);
+  const high = Number(update.h);
+  const low = Number(update.l);
+  const close = Number(update.c);
+  const volume = Number(update.v);
+  return {
+    time: update.t,
+    open,
+    high,
+    low,
+    close,
+    markOpen: open,
+    markHigh: high,
+    markLow: low,
+    markClose: close,
+    volume,
+    volumeQuote: volume * close,
+    tradeCount: update.n ?? 0,
+  };
 }
 
 /**

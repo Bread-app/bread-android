@@ -2094,6 +2094,9 @@ export function SandwichComposerScreen() {
     <CookingOverlay
       visible={generating && !handoff}
       stage={stage}
+      kind={job?.kind ?? "sandwich"}
+      input={job?.kind === "sandwich" ? prompt : undefined}
+      startedAt={job?.startedAt}
       hint={
         job?.kind === "podcast"
           ? "Hang tight — reading the captions needs the app open."

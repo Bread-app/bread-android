@@ -52,6 +52,9 @@ function marketKind(market: SymbolCarrier): PhoenixAssetKind | 'commodity' {
  */
 export function normalizePhoenixAssetSymbol(symbol: string): string {
   let normalized = symbol.trim().toUpperCase();
+  // A Hyperliquid market shown through the perps screen: `HL:xyz:NVDA` and
+  // `HL:BTC` are the tickers `NVDA` and `BTC`.
+  normalized = normalized.replace(/^HL:(?:[A-Z0-9]+:)?/, '');
   normalized = normalized.replace(/(?:[-_/.:]?PERP(?:ETUAL)?)$/, '');
   if (normalized.endsWith('ON') && normalized.length > 4) {
     normalized = normalized.slice(0, -2);

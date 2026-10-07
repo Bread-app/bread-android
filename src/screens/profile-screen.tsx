@@ -180,6 +180,13 @@ import { formatLeverage } from "@/lib/phoenix-position-leverage";
 import { takePhoenixCloseBuild } from "@/lib/phoenix-prebuild";
 import { usePhoenixPositionSheet } from "@/lib/phoenix-position-sheet-store";
 import {
+  HyperliquidPositionSheet,
+  hyperliquidDisplaySymbol,
+  type HyperliquidPositionSheetRef,
+} from "@/components/hyperliquid-position-sheet";
+import { getHyperliquidAccount, type HyperliquidPosition } from "@/lib/hyperliquid-api";
+import { PERPS_VENUE } from "@/lib/perps-venue";
+import {
   PhoenixAccountSheet,
   SETTLE_REFRESH_MS,
   type PhoenixAccountSheetRef,
@@ -657,6 +664,10 @@ export function ProfileScreen() {
   const [selectedPerpSandwich, setSelectedPerpSandwich] = useState<PerpSandwichPosition | null>(null);
   const [perpSandwichActionId, setPerpSandwichActionId] = useState<string | null>(null);
   const [phoenixAccount, setPhoenixAccount] = useState<PhoenixAccountResponse | null>(null);
+  // Hyperliquid positions, when this build trades perps there. Last good read
+  // is kept on a failed refresh, same as Phoenix's.
+  const [hyperliquidPositions, setHyperliquidPositions] = useState<HyperliquidPosition[]>([]);
+  const hyperliquidPositionSheetRef = useRef<HyperliquidPositionSheetRef>(null);
   const [phoenixLoading, setPhoenixLoading] = useState(false);
   const [closingPhoenixSymbol, setClosingPhoenixSymbol] = useState<string | null>(null);
   const positionSheet = usePhoenixPositionSheet();
@@ -1316,6 +1327,26 @@ export function ProfileScreen() {
   }, [primarySolanaAddress]);
 
   useEffect(() => loadPhoenixData(), [loadPhoenixData, portfolioRefreshKey]);
+
+  const loadHyperliquidData = useCallback(() => {
+    if (PERPS_VENUE !== "hyperliquid" || !primarySolanaAddress) {
+      setHyperliquidPositions([]);
+      return () => {};
+    }
+    let isCurrent = true;
+    void getHyperliquidAccount()
+      .then(({ account }) => {
+        if (isCurrent) setHyperliquidPositions(account.positions);
+      })
+      .catch(() => {
+        // Keep the last good read; an empty list would look like a closed position.
+      });
+    return () => {
+      isCurrent = false;
+    };
+  }, [primarySolanaAddress]);
+
+  useEffect(() => loadHyperliquidData(), [loadHyperliquidData, portfolioRefreshKey]);
 
   const closePhoenixPosition = useCallback(
     async (
@@ -2925,12 +2956,17 @@ export function ProfileScreen() {
       Math.abs(position.positionSize) > 0 && Math.abs(position.positionValue) >= DUST_USD,
   );
 
+  const visibleHyperliquidPositions = hyperliquidPositions.filter(
+    (position) => position.size > 0 && Math.abs(position.positionValueUsd) >= DUST_USD,
+  );
+
   const holdingTokens = (() => {
     if (!positionsClassified) return []; // Still classifying — block all token rows
     if (visibleBalanceTokens.length > 0) return visibleBalanceTokens;
     if (effectivePositions.length > 0) return []; // Only sandwiches, no standalone tokens
     if (visiblePerpsPositions.length > 0) return []; // Perps positions render separately
     if (visiblePhoenixPositions.length > 0) return []; // Phoenix positions render separately
+    if (visibleHyperliquidPositions.length > 0) return []; // Hyperliquid positions render separately
     if (perpsLoading) return []; // Avoid placeholder flash
     // No holdings yet — return empty so the empty state renders
     return [];
@@ -2941,7 +2977,8 @@ export function ProfileScreen() {
     holdingTokens.length +
     visiblePerpSandwichPositions.length +
     visiblePerpsPositions.length +
-    visiblePhoenixPositions.length;
+    visiblePhoenixPositions.length +
+    visibleHyperliquidPositions.length;
 
   const crossmintClientKey =
     process.env.EXPO_PUBLIC_CROSSMINT_CLIENT_API_KEY ?? "";
@@ -3677,6 +3714,69 @@ export function ProfileScreen() {
                   </View>
                 );
               })}
+              {visibleHyperliquidPositions.map((position) => {
+                const pnlColor = position.unrealizedPnlUsd >= 0 ? colors.positive : colors.negative;
+                const pnlPctLabel = formatPnlPercentage(
+                  pnlPercentageFromBasis(position.unrealizedPnlUsd, position.marginUsedUsd),
+                );
+                const symbol = hyperliquidDisplaySymbol(position.coin).toUpperCase();
+                const displayName = COMPANY_NAME_OVERRIDES[symbol] || symbol;
+                return (
+                  <View key={`hyperliquid:${position.coin}`}>
+                  <PressableScale
+                    accessibilityRole="button"
+                    accessibilityLabel={`${displayName} ${position.side} position details`}
+                    accessibilityHint="Opens position controls"
+                    onPress={() => hyperliquidPositionSheetRef.current?.open(position)}
+                    style={styles.leveragePositionCard}
+                  >
+                    <AssetLogo
+                      uri={null}
+                      size={40}
+                      borderRadius={20}
+                      backgroundColor={colors.surfaceAlt}
+                      fallback={
+                        <View style={styles.leverageLogoFallback}>
+                          <Text style={styles.leverageLogoFallbackText}>
+                            {displayName.slice(0, 1)}
+                          </Text>
+                        </View>
+                      }
+                    />
+                    <View style={styles.leveragePositionCopy}>
+                      <View style={styles.leveragePositionNameRow}>
+                        <Text numberOfLines={1} style={styles.leveragePositionName}>
+                          {displayName}
+                        </Text>
+                      </View>
+                      <Text
+                        style={[
+                          styles.leveragePositionSide,
+                          { color: position.side === "long" ? colors.positive : colors.negative },
+                        ]}
+                      >
+                        {position.side.toUpperCase()} {formatLeverage(position.leverage)}
+                      </Text>
+                    </View>
+                    <View style={styles.leveragePositionMetric}>
+                      <Text
+                        numberOfLines={1}
+                        adjustsFontSizeToFit
+                        minimumFontScale={0.75}
+                        style={styles.leveragePositionValue}
+                      >
+                        {formatUsd(position.marginUsedUsd + position.unrealizedPnlUsd)}
+                      </Text>
+                      {pnlPctLabel ? (
+                        <Text style={[styles.leveragePositionPnl, { color: pnlColor }]}>
+                          {pnlPctLabel}
+                        </Text>
+                      ) : null}
+                    </View>
+                  </PressableScale>
+                  </View>
+                );
+              })}
               {visiblePhoenixPositions.map((position) => {
                 const side = position.positionSize < 0 ? "short" : "long";
                 const pnlPositive = position.unrealizedPnl >= 0;
@@ -3834,6 +3934,7 @@ export function ProfileScreen() {
               {holdingsCategory === "perps" &&
               visiblePerpSandwichPositions.length === 0 &&
               visiblePhoenixPositions.length === 0 &&
+              visibleHyperliquidPositions.length === 0 &&
               visiblePerpsPositions.length === 0 ? (
                 <View style={styles.emptyState}>
                   <Text style={styles.emptyIcon}>📈</Text>
@@ -4170,6 +4271,16 @@ export function ProfileScreen() {
           ) : null}
         </View>
       </Modal>
+      <HyperliquidPositionSheet
+        ref={hyperliquidPositionSheetRef}
+        onChanged={() => {
+          // Re-read once the venue can see the fill — see SETTLE_REFRESH_MS.
+          setTimeout(() => {
+            setPortfolioRefreshKey((value) => value + 1);
+            loadHyperliquidData();
+          }, SETTLE_REFRESH_MS);
+        }}
+      />
       <PhoenixAccountSheet
         ref={phoenixAccountSheetRef}
         onAccountChanged={(move) => {

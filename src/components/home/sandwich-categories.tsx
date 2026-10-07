@@ -76,7 +76,7 @@ function SavedFilterButton({ active, onPress }: { active: boolean; onPress: () =
   return (
     <PressableScale
       accessibilityRole="button"
-      accessibilityLabel="Show saved sandwiches"
+      accessibilityLabel={active ? 'Show trending sandwiches' : 'Show saved sandwiches'}
       accessibilityState={{ selected: active }}
       onPress={onPress}
       hitSlop={6}
@@ -182,7 +182,11 @@ export function SandwichCategories({
           active={filter === 'trending'}
           onPress={() => setFilter('trending')}
         />
-        <SavedFilterButton active={filter === 'saved'} onPress={() => setFilter('saved')} />
+        {/* A toggle: tapping the lit bookmark again returns to Trending. */}
+        <SavedFilterButton
+          active={filter === 'saved'}
+          onPress={() => setFilter((current) => (current === 'saved' ? 'trending' : 'saved'))}
+        />
       </View>
 
       {filter === 'saved' ? (

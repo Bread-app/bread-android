@@ -1,6 +1,6 @@
 import { NotificationTweet } from '@/components/notification-tweet';
 import { BottomSheetBackdrop, BottomSheetModal, BottomSheetScrollView } from '@gorhom/bottom-sheet';
-import { useEmbeddedSolanaWallet } from '@privy-io/expo';
+import { useEmbeddedEthereumWallet, useEmbeddedSolanaWallet } from '@privy-io/expo';
 import React, {
   forwardRef,
   useCallback,
@@ -61,6 +61,7 @@ import {
 } from '@/lib/phoenix-prebuild';
 import { useThemeStore } from '@/lib/theme-store';
 import { useCash } from '@/hooks/use-cash';
+import { useHyperliquidVenue } from '@/hooks/use-hyperliquid-venue';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
 import {
   applyLiveMark,
@@ -82,6 +83,14 @@ import {
   type PhoenixMarket,
   type PhoenixTradeSide,
 } from '@/lib/phoenix-api';
+import type { EvmSigningWallet } from '@/lib/evm-sign';
+import {
+  HYPERLIQUID_FEE_RATE,
+  HYPERLIQUID_MIN_NOTIONAL_USD,
+  hyperliquidLiquidationPrice,
+} from '@/lib/hyperliquid-risk';
+import { isHyperliquidPerpSymbol } from '@/lib/hyperliquid-perp-market';
+import { openHyperliquidTrade } from '@/lib/hyperliquid-trade';
 import { useToast } from '@/lib/toast-store';
 import { useTradeFx } from '@/lib/trade-fx';
 import { perpLogoSources } from '@/lib/stock-logos';
@@ -417,6 +426,13 @@ const PhoenixMarketDetailSheetContent = forwardRef<
       live,
     );
 
+    // Hyperliquid, when this build trades perps there and it lists the ticker.
+    // The chart and market stats above stay Phoenix's; the order, the balance it
+    // draws on and the risk figures switch over. See useHyperliquidVenue.
+    const hl = useHyperliquidVenue(market ? normalizePhoenixAssetSymbol(market.symbol) : null);
+    const ethereum = useEmbeddedEthereumWallet();
+    const evmWallet = (ethereum.wallets?.[0] ?? null) as EvmSigningWallet | null;
+
     /**
      * Read the perps account, and **never downgrade a known-good one**.
      *
@@ -530,6 +546,16 @@ const PhoenixMarketDetailSheetContent = forwardRef<
       },
       [autoProgress, maxLeverage, orderDragY, orderProgress],
     );
+
+    // A Hyperliquid ticket sizes the order off the mark and the free balance, so
+    // both are re-read the moment it opens rather than trusted from the last poll.
+    const hlActive = hl.active;
+    const { reloadAccount: reloadHlAccount, reloadMarket: reloadHlMarket } = hl;
+    useEffect(() => {
+      if (!orderOpen || !hlActive) return;
+      void reloadHlMarket();
+      void reloadHlAccount();
+    }, [hlActive, orderOpen, reloadHlAccount, reloadHlMarket]);
 
     // Mount first, then slide. See the comment in openOrderPad.
     const orderOpenRef = useRef(false);
@@ -694,7 +720,9 @@ const PhoenixMarketDetailSheetContent = forwardRef<
       };
       // Use the same progress surface as a stock buy. `loading` suppresses the
       // receipt's hero, burst and success haptics until the position is real.
-      const receiptId = tradeFx.playPerp({ ...pendingReceipt, loading: true });
+      // A Hyperliquid fill has no Phoenix position for "Add thesis" to point at.
+      const startReceipt = hl.active ? { ...pendingReceipt, thesis: undefined } : pendingReceipt;
+      const receiptId = tradeFx.playPerp({ ...startReceipt, loading: true });
       try {
         // Paper mode (dev builds only): everything above this line has already
         // run — the pad validated, sized, and priced the order — so the receipt
@@ -708,6 +736,42 @@ const PhoenixMarketDetailSheetContent = forwardRef<
           return;
         }
         if (!wallet) throw new Error('Connect a wallet before trading.');
+        if (hl.active && hl.market) {
+          if (!evmWallet) throw new Error('Your perps wallet is still loading — try again in a moment.');
+          // Tops up from cash and runs the one-time setup first when needed;
+          // the order itself is signed server-side by the user's trading key.
+          const result = await openHyperliquidTrade(
+            {
+              market: hl.market.coin,
+              side,
+              marginUsd: Number(marginUsd),
+              leverage: Math.max(1, Math.round(leverage)),
+              takeProfitPx: takeProfitPrice,
+              stopLossPx: stopLossPrice,
+            },
+            { solana: wallet, evm: evmWallet },
+            (step) => {
+              if (step === 'topping-up') toast.showToast('Moving cash to perps…', 'info');
+            },
+          );
+          void Promise.all([hl.reloadAccount(), refreshCash()]).catch(() => undefined);
+          tradeFx.updatePerp(receiptId, {
+            action: 'open',
+            side,
+            symbol: receiptSymbol,
+            name: market.name ?? null,
+            ...perpReceiptLogo(),
+            leverage: result.leverage,
+            entryPrice: result.avgPx,
+            marginUsd: result.marginUsd,
+            loading: false,
+          });
+          if (result.tpsl?.error) {
+            toast.showToast(`Position is open, but SL/TP wasn't set: ${result.tpsl.error}`, 'error');
+          }
+          closeOrderPad();
+          return;
+        }
         // Usually already built while the pad sat on these inputs; see
         // lib/phoenix-prebuild. Falls back to a fresh build otherwise.
         const built = await takePhoenixOrderBuild(
@@ -780,6 +844,8 @@ const PhoenixMarketDetailSheetContent = forwardRef<
       closeOrderPad,
       detail?.markPrice,
       embeddedIconUri,
+      evmWallet,
+      hl,
       leverage,
       loadAccount,
       marginUsd,
@@ -1000,16 +1066,30 @@ const PhoenixMarketDetailSheetContent = forwardRef<
     const orderLogoSources = market
       ? perpLogoSources(market, embeddedIconUri)
       : { uri: null, fallbackUris: [] };
+    /**
+     * The ticker as the user reads it. A Hyperliquid market's symbol carries its
+     * routing prefix (`HL:xyz:XYZ100`) — that's for the data layer, never the screen.
+     */
+    const displaySymbol = market
+      ? isHyperliquidPerpSymbol(market.symbol)
+        ? normalizePhoenixAssetSymbol(market.symbol)
+        : market.symbol
+      : '';
     const chartWidth = width - 32;
     // The chart is the reason this sheet is open; give it the room.
     const chartHeight = 320;
     const margin = Number(marginUsd);
-    const validMargin = Number.isFinite(margin) && margin >= 1;
-    const availableMargin = Math.max(
-      0,
-      (account?.account.cross?.effectiveCollateral ?? 0) -
-        (account?.account.cross?.initialMargin ?? 0),
-    );
+    // Hyperliquid's floor is on exposure ($10 notional), Phoenix's on margin ($1).
+    const validMargin = hl.active
+      ? Number.isFinite(margin) && margin > 0 && margin * leverage >= HYPERLIQUID_MIN_NOTIONAL_USD
+      : Number.isFinite(margin) && margin >= 1;
+    const availableMargin = hl.active
+      ? Math.max(0, hl.account?.withdrawable ?? 0)
+      : Math.max(
+          0,
+          (account?.account.cross?.effectiveCollateral ?? 0) -
+            (account?.account.cross?.initialMargin ?? 0),
+        );
     /**
      * Liquidation and the stop ceiling for the trade being composed.
      *
@@ -1034,35 +1114,58 @@ const PhoenixMarketDetailSheetContent = forwardRef<
      * maintenance factor normally leaves a valid liquidation band at that exact
      * leverage. Keep a fail-closed scan only for unusual future market params.
      */
-    const orderMaxLeverage = selectableMaxLeverage(
-      risk.maxLeverage ?? maxLeverage,
-      market?.maintenanceMarginBps ?? null,
-    );
+    const orderMaxLeverage = hl.active && hl.market
+      ? Math.max(1, Math.floor(hl.market.maxLeverage))
+      : selectableMaxLeverage(risk.maxLeverage ?? maxLeverage, market?.maintenanceMarginBps ?? null);
+    /**
+     * The ticket prices off the venue that will fill it. A Hyperliquid-only
+     * market's screen data already *is* Hyperliquid's live stream; a ticker
+     * shown with Phoenix's chart but filled on Hyperliquid uses Hyperliquid's
+     * mark, re-read when the ticket opens.
+     */
+    const orderMarkPrice =
+      market && isHyperliquidPerpSymbol(market.symbol)
+        ? markPrice
+        : hl.active && hl.market
+          ? hl.market.markPx
+          : markPrice;
+    const liquidationPrice = hl.active && hl.market
+      ? hyperliquidLiquidationPrice({
+          side,
+          entryPrice: orderMarkPrice,
+          leverage,
+          maxLeverage: hl.market.maxLeverage,
+        })
+      : risk.liquidationPrice;
 
     useEffect(() => {
       setLeverage((current) => Math.min(current, orderMaxLeverage));
     }, [orderMaxLeverage]);
 
-    const estimatedFee = validMargin ? margin * leverage * (market?.takerFee ?? 0) : 0;
+    const feeRate = hl.active ? HYPERLIQUID_FEE_RATE : (market?.takerFee ?? 0);
+    const estimatedFee = validMargin ? margin * leverage * feeRate : 0;
     const estimatedCashMove = validMargin
       ? Math.max(0, margin + Math.max(0.1, estimatedFee) - availableMargin)
       : 0;
     const notEnoughCash = validMargin && estimatedCashMove > cashUsd + 0.000001;
+    // Hyperliquid has no activation step: the first trade tops up from cash,
+    // which opens the account, then runs the one-time setup.
+    const registered = hl.active || account?.account.registered === true;
     const canTrade =
       !!wallet &&
-      account?.account.registered === true &&
+      (!hl.active || !!evmWallet) &&
+      registered &&
       validMargin &&
       leverage <= orderMaxLeverage &&
-      risk.liquidationPrice !== null &&
+      liquidationPrice !== null &&
       !notEnoughCash &&
       !submitting;
-    const registered = account?.account.registered === true;
 
     // Pre-build the order once the pad settles on a tradable set of inputs, so
     // the confirm slide is only sign + send. Same inputs placeTrade sends; the
     // debounce keeps keypad typing and leverage drags from spending Phoenix's
     // shared rate limit on every step. Paper mode never builds.
-    const canPrebuild = orderOpen && !isPaperMode() && canTrade;
+    const canPrebuild = orderOpen && !isPaperMode() && canTrade && !hl.active;
     const prebuildSymbol = market?.symbol ?? null;
     useEffect(() => {
       if (!canPrebuild || !prebuildSymbol) return;
@@ -1113,7 +1216,8 @@ const PhoenixMarketDetailSheetContent = forwardRef<
      * answer is more cash, not a transfer, and `padMessage` says so.
      */
     const moveCashUsd =
-      registered && validMargin && estimatedCashMove > 0 && !notEnoughCash
+      // Hyperliquid tops up inside the trade itself; no separate step to offer.
+      !hl.active && registered && validMargin && estimatedCashMove > 0 && !notEnoughCash
         ? Math.min(Math.ceil(estimatedCashMove * 100) / 100, cashUsd)
         : 0;
 
@@ -1172,7 +1276,9 @@ const PhoenixMarketDetailSheetContent = forwardRef<
     const padMessage = tradeError
       ? tradeError
       : marginUsd !== '' && !validMargin
-        ? 'Minimum margin is $1.'
+        ? hl.active
+          ? `Minimum trade is $${HYPERLIQUID_MIN_NOTIONAL_USD} of exposure.`
+          : 'Minimum margin is $1.'
         : null;
 
     // The embedded view can also live inside a card-morph surface that is not
@@ -1280,7 +1386,7 @@ const PhoenixMarketDetailSheetContent = forwardRef<
               backgroundColor="transparent"
               fallback={
                 <View style={styles.iconFallback}>
-                  <Text style={styles.iconFallbackText}>{market.symbol.slice(0, 1)}</Text>
+                  <Text style={styles.iconFallbackText}>{displaySymbol.slice(0, 1)}</Text>
                 </View>
               }
             />
@@ -1527,7 +1633,7 @@ const PhoenixMarketDetailSheetContent = forwardRef<
                 {notificationTweetUrl ? <NotificationTweet url={notificationTweetUrl} compact /> : null}
                 <PhoenixOrderPad
                   disableGlass={!useGlass}
-                  symbol={market.symbol}
+                  symbol={displaySymbol}
                   logoUri={orderLogoSources.uri}
                   logoFallbackUris={orderLogoSources.fallbackUris}
                   openInterestUsd={openInterestUsd}
@@ -1535,13 +1641,13 @@ const PhoenixMarketDetailSheetContent = forwardRef<
                   amount={marginUsd}
                   leverage={leverage}
                   maxLeverage={orderMaxLeverage}
-                  markPrice={markPrice}
+                  markPrice={orderMarkPrice}
                   change24hPercent={change?.changePercent ?? null}
                   // One source for the stack: the ticket and Auto Close must
                   // not quote two different liquidation prices for one trade.
-                  liquidationPrice={risk.liquidationPrice}
+                  liquidationPrice={liquidationPrice}
                   estimatedFeeUsd={estimatedFee}
-                  feeRatePercent={market.takerFee * 100}
+                  feeRatePercent={feeRate * 100}
                   availableMarginUsd={availableMargin}
                   cashUsd={cashUsd}
                   message={padMessage}
@@ -1555,7 +1661,10 @@ const PhoenixMarketDetailSheetContent = forwardRef<
                   needsCash={notEnoughCash}
                   onAddCash={onEmbeddedAddCash ?? (() => router.push('/deposit'))}
                   onChangeAmount={setMarginUsd}
-                  onChangeLeverage={setLeverage}
+                  // Hyperliquid takes whole-number leverage only.
+                  onChangeLeverage={
+                    hl.active ? (next) => setLeverage(Math.max(1, Math.round(next))) : setLeverage
+                  }
                   onSubmit={() => void placeTrade()}
                   onAutoClose={() => {
                     if (markPrice === null) {
@@ -1589,16 +1698,16 @@ const PhoenixMarketDetailSheetContent = forwardRef<
                   <PhoenixAutoClosePad
                     layout="modal"
                     disableGlass={!useGlass}
-                    symbol={market.symbol}
+                    symbol={displaySymbol}
                     side={side}
-                    referencePrice={markPrice}
+                    referencePrice={orderMarkPrice}
                     candles={chartCandles}
                     chartWidth={chartWidth}
                     notionalUsd={validMargin ? margin * leverage : 0}
                     // The collateral, so the pad can state the return on what
                     // the user is actually putting in rather than on notional.
                     marginUsd={validMargin ? margin : null}
-                    liquidationPrice={risk.liquidationPrice}
+                    liquidationPrice={liquidationPrice}
                     maxStopPercent={risk.maxStopPct}
                     takeProfitPrice={takeProfitPrice}
                     stopLossPrice={stopLossPrice}

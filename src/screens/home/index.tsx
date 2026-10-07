@@ -28,17 +28,18 @@ import Animated, {
 } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { SandwichCategories } from "@/components/home/sandwich-categories";
 import { CrtTexture } from "@/components/home/crt-texture";
-import { TickerTape } from "@/components/home/ticker-tape";
+import { SandwichCategories } from "@/components/home/sandwich-categories";
+import { TICKER_HEIGHT, TickerTape } from "@/components/home/ticker-tape";
 import { BottomTabInset, Fonts, type ThemeColors } from "@/constants/theme";
 import { useThemedStyles } from "@/hooks/use-themed-styles";
 import { appUserPayloadFromPrivyUser } from "@/lib/api";
+import { withAlpha } from "@/lib/color-utils";
 import { useStockDetail } from "@/lib/stock-detail-store";
 import { useThemeStore } from "@/lib/theme-store";
 
 import { AddCashButton } from "./add-cash-button";
-import { SHEET_RADIUS } from "./header-palette";
+import { HeaderPalette, SHEET_RADIUS } from "./header-palette";
 import { formatUsd } from "./helpers";
 import { PortfolioHero } from "./portfolio-hero";
 import { useHomeFeed } from "./use-home-feed";
@@ -47,15 +48,16 @@ import { useHomePortfolio } from "./use-home-portfolio";
 import { useHomeSaved } from "./use-home-saved";
 
 /**
- * Home keeps its balance and action on the same themed ground as the feed, with
- * the content riding up underneath a compact header while scrolling.
+ * Home is a dark header board — balance, action, ticker — with the content
+ * riding up over it on a rounded sheet.
  *
- * The data behind each region lives in its own hook (`use-home-portfolio` and
- * `use-home-feed`), so this file is layout and sheet wiring only.
+ * The data behind each region lives in its own hook (`use-home-portfolio`,
+ * `use-home-feed`, `use-home-movers`), so this file is layout and sheet
+ * wiring only.
  */
 export function HomeScreen() {
   const styles = useThemedStyles(makeStyles);
-  const { colors, scheme } = useThemeStore();
+  const { scheme } = useThemeStore();
   const { user } = usePrivy();
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -78,7 +80,7 @@ export function HomeScreen() {
   //
   // Its height is measured only so the compact bar knows when to take over.
   const [boardHeight, setBoardHeight] = useState(
-    insets.top + BOARD_PAD_TOP + 84 + BOARD_PAD_BOTTOM,
+    insets.top + BOARD_PAD_TOP + 84 + BOARD_PAD_BOTTOM + TICKER_HEIGHT,
   );
   const barHeight = insets.top + BOARD_PAD_TOP + COMPACT_HERO_HEIGHT + COMPACT_PAD_BOTTOM;
 
@@ -126,11 +128,12 @@ export function HomeScreen() {
     transform: [{ translateY: Math.max(handoff - scrollY.value, 0) }],
   }));
 
-  // Home now uses the normal themed page ground, so the status bar follows the
-  // active scheme instead of being forced light for the old blue board.
+  // The header runs behind the status bar, so its glyphs have to be light while
+  // Home is focused regardless of the app's theme — and handed back on the way
+  // out, or every other tab inherits Home's setting.
   useFocusEffect(
     useCallback(() => {
-      setStatusBarStyle(scheme === "dark" ? "light" : "dark");
+      setStatusBarStyle("light");
       return () => setStatusBarStyle(scheme === "dark" ? "light" : "dark");
     }, [scheme]),
   );
@@ -157,6 +160,12 @@ export function HomeScreen() {
 
   return (
     <View style={styles.page}>
+      {/* Behind the scroll view, so it only shows in the bounce gap above the
+          header — the one dark band that the header's own texture cannot reach. */}
+      <View style={styles.topGround} pointerEvents="none">
+        <CrtTexture id="page-scanlines" />
+      </View>
+
       <Animated.ScrollView
         style={styles.scroll}
         contentContainerStyle={styles.content}
@@ -173,12 +182,14 @@ export function HomeScreen() {
           <RefreshControl
             refreshing={refreshing}
             onRefresh={() => void refreshAll()}
-            tintColor={colors.textSecondary}
+            // Pulling down reveals the dark header, never the page background.
+            tintColor={HeaderPalette.muted}
           />
         }
       >
-        {/* The header stays in the scroll flow, but no longer paints a separate
-            blue board behind the portfolio content. */}
+        {/* The dark board, in the scroll flow. It travels up with the feed, and
+            the sheet's rounded top follows it the whole way — no offsets to keep
+            in step, and no way for content to outrun it. */}
         <View
           style={[styles.board, { paddingTop: insets.top + BOARD_PAD_TOP }]}
           onLayout={(event) => {
@@ -200,22 +211,25 @@ export function HomeScreen() {
               onRetry={() => void refreshAll()}
             />
           </View>
+
+          {/* The tape rides the bottom edge of the board: 24h top and bottom
+              movers, each with its token logo. */}
+          <TickerTape
+            stocks={movers.tape}
+            onSelect={(stock, source, nativeSourceKey) => {
+              void Haptics.selectionAsync();
+              openStock(stock, { source, nativeSourceKey });
+            }}
+          />
+
+          {/* Last child, so the scanlines cover the safe-area band, the balance
+              and the tape in one pass. */}
+          <CrtTexture />
         </View>
 
         {/* Everything below the fold lives on the sheet, which laps up over the
             board's bottom edge. */}
         <View style={styles.sheet}>
-          {/* 24h top and bottom performers — ticker and change only, always
-              moving — above the feed's Trending title. */}
-          <View style={styles.movers}>
-            <TickerTape
-              stocks={movers.tape}
-              onSelect={(stock, source, nativeSourceKey) => {
-                void Haptics.selectionAsync();
-                openStock(stock, { source, nativeSourceKey });
-              }}
-            />
-          </View>
           <SandwichCategories
             posts={feed.posts}
             loading={feed.loading}
@@ -231,8 +245,11 @@ export function HomeScreen() {
         </View>
       </Animated.ScrollView>
 
-      {/* The compact balance uses the same background as the page, so the
-          header can contract without introducing a coloured band. */}
+      {/* The contracted panel: the balance, small and centred, on the board's
+          sky blue. It only fades in once the board itself has very
+          nearly scrolled off, and being the last thing drawn it is what the feed
+          runs underneath — so nothing from the sheet can ever reach the top of
+          the screen. */}
       <Animated.View
         style={[styles.bar, barStyle, { height: barHeight, paddingTop: insets.top + BOARD_PAD_TOP }]}
         pointerEvents="none"
@@ -242,6 +259,8 @@ export function HomeScreen() {
             ? formatUsd(portfolio.displayedValue)
             : "\u2014"}
         </Text>
+
+        <CrtTexture id="bar-scanlines" />
       </Animated.View>
 
       {/* The frosted edge. Not the panel — the panel is solid — but the band of
@@ -288,15 +307,42 @@ export function HomeScreen() {
         </MaskedView>
       </Animated.View>
 
-      {/* CRT scanlines over the whole page, fixed to the screen, strongest at
-          the top and fading out toward the bottom. Last child so it lies over
-          everything; the texture itself ignores touches. */}
-      <CrtTexture
-        id="home-page-scanlines"
-        color={scheme === "dark" ? "rgba(255, 255, 255, 0.07)" : "rgba(11, 22, 34, 0.07)"}
-        fade
-      />
+      {/* The sheet's rounded shoulders, redrawn just BELOW the bar. The real
+          ones have travelled up underneath it by now, and the feed would
+          otherwise meet the bar on a hard square edge.
+
+          These are inverse corners — the small wedge of ground OUTSIDE the
+          curve — so they have to be drawn, not built out of a rounded View: a
+          rounded box paints the inside of the curve, which is the part the feed
+          is already filling. Hence the two paths, and hence nothing solid
+          between them: the content keeps running underneath. */}
+      <Animated.View
+        style={[styles.shoulders, barStyle, { top: barHeight }]}
+        pointerEvents="none"
+      >
+        <ShoulderWedge
+          d={`M 0 0 L ${SHEET_RADIUS} 0 A ${SHEET_RADIUS} ${SHEET_RADIUS} 0 0 0 0 ${SHEET_RADIUS} Z`}
+        />
+        <ShoulderWedge
+          d={`M ${SHEET_RADIUS} 0 L 0 0 A ${SHEET_RADIUS} ${SHEET_RADIUS} 0 0 1 ${SHEET_RADIUS} ${SHEET_RADIUS} Z`}
+        />
+      </Animated.View>
+
     </View>
+  );
+}
+
+/**
+ * One inverse corner under the panel: the wedge of ground OUTSIDE the curve.
+ *
+ * The shape can only be drawn, not built from a rounded `View` — a rounded box
+ * paints the inside of the curve, which is the part the feed already fills.
+ */
+function ShoulderWedge({ d }: { d: string }) {
+  return (
+    <Svg width={SHEET_RADIUS} height={SHEET_RADIUS}>
+      <Path d={d} fill={HeaderPalette.backgroundBottom} />
+    </Svg>
   );
 }
 
@@ -322,38 +368,60 @@ const makeStyles = (c: ThemeColors) =>
   StyleSheet.create({
     page: {
       flex: 1,
+      // The sheet's colour, NOT the header's. The tab bar is translucent and
+      // the content can bounce clear of it, so whatever sits here is what tints
+      // the bar — a dark page ground read as a permanent shadow behind the nav.
       backgroundColor: c.background,
+    },
+    // Dark ground for the TOP overscroll only, behind the scroll view. Bouncing
+    // past the top has to reveal the board's own colour or the header appears
+    // to detach from the status bar. Fixed height so it never reaches the nav.
+    topGround: {
+      position: 'absolute',
+      top: 0,
+      left: 0,
+      right: 0,
+      height: 420,
+      backgroundColor: HeaderPalette.background,
     },
     scroll: {
       flex: 1,
     },
     content: {
       flexGrow: 1,
-      backgroundColor: c.background,
+      // The sheet's rounded top corners expose this parent. Match the board's
+      // lower stop so the board colour continues behind the curves instead of
+      // flashing the bright overscroll blue at the left and right edges.
+      backgroundColor: HeaderPalette.backgroundBottom,
     },
     board: {
-      backgroundColor: c.background,
+      backgroundColor: HeaderPalette.background,
     },
     headerInner: {
       paddingHorizontal: 24,
       paddingBottom: BOARD_PAD_BOTTOM,
     },
+    // The contracted panel. Same sky blue as the board, so its fade-in reads as
+    // the board contracting rather than as a second surface arriving.
     bar: {
       position: 'absolute',
       top: 0,
       left: 0,
       right: 0,
       alignItems: 'center',
-      backgroundColor: c.background,
+      backgroundColor: HeaderPalette.backgroundBottom,
     },
     compactValue: {
-      color: c.text,
+      color: HeaderPalette.value,
       fontSize: 17,
       lineHeight: COMPACT_HERO_HEIGHT,
       fontWeight: '800',
       fontFamily: Fonts.rounded,
       fontVariant: ['tabular-nums'],
       letterSpacing: -0.4,
+      textShadowColor: withAlpha(HeaderPalette.value, 0.45),
+      textShadowOffset: { width: 0, height: 0 },
+      textShadowRadius: 8,
     },
     edge: {
       position: 'absolute',
@@ -361,10 +429,13 @@ const makeStyles = (c: ThemeColors) =>
       right: 0,
       height: EDGE_HEIGHT,
     },
-    // Full bleed: the tape runs edge to edge through the sheet's gutter.
-    movers: {
-      marginHorizontal: -24,
-      marginBottom: 14,
+    shoulders: {
+      position: 'absolute',
+      left: 0,
+      right: 0,
+      height: SHEET_RADIUS,
+      flexDirection: 'row',
+      justifyContent: 'space-between',
     },
     sheet: {
       flexGrow: 1,
