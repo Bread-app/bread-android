@@ -648,6 +648,21 @@ export function getBuilderMeta(sandwich: Sandwich) {
 }
 
 /**
+ * The Bread user a sandwich's byline credits AND links to: whoever submitted the
+ * source, falling back to the builder. Each viewer who opens a podcast call gets
+ * their own Sandwich, so `builder` can be a stranger who merely opened one — the
+ * byline said @royden while its tap (always `source.user`) opened @bradvani.
+ */
+export function getCreatorMeta(sandwich: Sandwich) {
+  const user = sandwich.source?.user;
+  if (!user?.privyUserId) return getBuilderMeta(sandwich);
+  return getBuilderMeta({
+    ...sandwich,
+    builder: { id: user.id, username: user.username, name: user.name, avatarUrl: user.avatarUrl, record: null },
+  } as Sandwich);
+}
+
+/**
  * The account a sandwich was sourced from — never its Bread builder.
  *
  * An origin is what makes this an externally sourced sandwich. Prefer that

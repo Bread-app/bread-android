@@ -20,7 +20,7 @@ import { VerifiedBadge } from '@/components/verified-badge';
 // specifier that is erased before it reaches the bundler.
 import { HeartToggle, type HeartToggleRef } from '@/components/heart-toggle';
 import { HandleText } from '@/components/handle-text';
-import { getBuilderMeta } from '@/lib/sandwich-feed';
+import { getCreatorMeta } from '@/lib/sandwich-feed';
 import { Fonts, type ThemeColors } from '@/constants/theme';
 import { useThemeStore } from '@/lib/theme-store';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
@@ -266,7 +266,10 @@ export function PodcastSandwichDetail({
   // and shipped these calls — matching the feed card that got you here. The
   // channel is still credited: it heads the video itself, right below. Only an
   // episode with no owning AppUser falls back to the channel handle.
-  const creator = sandwiches[0] ? getBuilderMeta(sandwiches[0]) : null;
+  // Name and tap must name the same person. Each viewer who opens a call gets
+  // their own Sandwich, so `sandwiches[0].builder` can be a stranger who merely
+  // opened one (@royden shown, @bradvani opened) — the paster is `source.user`.
+  const creator = sandwiches[0] ? getCreatorMeta(sandwiches[0]) : null;
   const displayHandle = creator ? `@${creator.name.replace(/^@+/, '')}` : channelHandleLabel(video);
   // The byline opens the builder's profile, the same as a sandwich detail's. An
   // unowned episode is bylined to the channel, which has no Bread profile.

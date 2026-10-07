@@ -47,7 +47,7 @@ import {
 } from '@/lib/api';
 import { formatTimestamp, momentCaption } from '@/lib/moment';
 import { podcastHoldingClipWindow } from '@/lib/podcast-holding-moment';
-import { getBuilderMeta } from '@/lib/sandwich-feed';
+import { getCreatorMeta } from '@/lib/sandwich-feed';
 import { provenanceDeepLink } from '@/lib/sandwich-provenance';
 import type { SandwichPosition } from '@/lib/sandwich-positions';
 import { CTA, ctaBottomInset } from '@/lib/screen-corners';
@@ -127,7 +127,7 @@ export function PodcastHoldingMomentModal({
   // same identity the sandwich's own detail screen leads with. The follow
   // state is read fresh per sandwich, and the button holds its place until it
   // lands so the header doesn't reflow.
-  const creator = activeData?.sandwich ? getBuilderMeta(activeData.sandwich) : null;
+  const creator = activeData?.sandwich ? getCreatorMeta(activeData.sandwich) : null;
   const creatorPrivyUserId = activeData?.sandwich?.source.user?.privyUserId ?? null;
   const viewerPrivyUserId = appUser?.privyUserId ?? null;
   const canFollowCreator = Boolean(

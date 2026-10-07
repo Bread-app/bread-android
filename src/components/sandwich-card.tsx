@@ -36,6 +36,7 @@ import {
   formatLegSide,
   formatPnl,
   getBuilderMeta,
+  getCreatorMeta,
   getBuilderTake,
   getLegPrimaryLine,
   getSourceAuthorMeta,
@@ -1359,7 +1360,7 @@ export const PodcastGroupCard = React.memo(function PodcastGroupCard({
   // the name a reader recognises in the feed. The builder who shipped these
   // markets is not dropped — they move to the sub-handle line beneath it, so the
   // card says "this episode, worked up by this person".
-  const creator = primary ? getBuilderMeta(primary) : null;
+  const creator = primary ? getCreatorMeta(primary) : null;
   const handle = video.channelHandle ?? video.channelName ?? creator?.name ?? "YouTube";
   const router = useRouter();
   const composer = useOptionalSandwichComposer();

@@ -248,6 +248,7 @@ import {
   formatSocialCount,
   getAvatarColor,
   getBuilderMeta,
+  getCreatorMeta,
   getBuilderTake,
   getLegPrimaryLine,
   getLegTitle,
@@ -5014,7 +5015,7 @@ export function SandwichDetailScreen() {
   const hasThesisContent = Boolean(
     thesisPreview || thesisBullets.length > 0 || sandwich?.research,
   );
-  const creator = sandwich ? getBuilderMeta(sandwich) : null;
+  const creator = sandwich ? getCreatorMeta(sandwich) : null;
   const sourceAuthor = sandwich ? getSourceAuthorMeta(sandwich) : null;
   const sourceVideo = sandwich ? getSourceVideo(sandwich) : null;
   // Where in the episode this sandwich's call was made. Drives the hero's
