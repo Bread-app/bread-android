@@ -100,6 +100,9 @@ const PEEK = 30;
 /** How much the back card shrinks. Scaled from its top edge, so the peek is exact. */
 const BACK_SCALE = 0.93;
 
+/** Flip to false to bring the Hyperliquid card back. */
+const HYPERLIQUID_CARD_HIDDEN = true;
+
 type BalanceCardStackProps = {
   /** Show both cards in full rather than an overlapping stack. */
   stacked?: boolean;
@@ -135,10 +138,13 @@ export const BalanceCardStack = React.forwardRef<
   BalanceCardStackRef,
   BalanceCardStackProps
 >(function BalanceCardStack(
-  { balanceLabel, walletAddress, onWithdraw, refreshKey = 0, stacked = true, venue = PERPS_VENUE, includeHyperliquid = false },
+  { balanceLabel, walletAddress, onWithdraw, refreshKey = 0, stacked = true, venue: venueProp = PERPS_VENUE, includeHyperliquid = false },
   ref,
 ) {
-  const showHyperliquid = includeHyperliquid && venue !== "hyperliquid";
+  // Hyperliquid is hidden from the UI for now (the backend stays live), so the
+  // card stack never shows a Hyperliquid card, whatever the build flag says.
+  const venue: PerpsVenue = HYPERLIQUID_CARD_HIDDEN ? "phoenix" : venueProp;
+  const showHyperliquid = !HYPERLIQUID_CARD_HIDDEN && includeHyperliquid && venue !== "hyperliquid";
   const cardCount = showHyperliquid ? 3 : 2;
   const [order, setOrder] = useState<number[]>(() => showHyperliquid ? [2, 1, 0] : [1, 0]);
   const activeIndex = order[order.length - 1];

@@ -95,7 +95,6 @@ export function WalletScreen() {
       >
         <View style={styles.cardSlot}>
           <BalanceCardStack
-            includeHyperliquid
             venue="phoenix"
             balanceLabel={balanceReady ? formatUsd(cash.totalCash) : null}
             walletAddress={walletStore.walletAddress}
