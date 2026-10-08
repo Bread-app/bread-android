@@ -193,9 +193,12 @@ export function PhoenixPositionSheet({
     useEffect(() => {
       if (context !== null || closePercent === null || !symbol || !wallet) return;
       const fraction = closePercent / 100;
-      const timer = setTimeout(() => prebuildPhoenixClose(symbol, fraction), 300);
+      const timer = setTimeout(
+        () => prebuildPhoenixClose(symbol, fraction, position?.subaccountIndex),
+        300,
+      );
       return () => clearTimeout(timer);
-    }, [closePercent, context, symbol, wallet]);
+    }, [closePercent, context, position?.subaccountIndex, symbol, wallet]);
 
     const submitAutoClose = useCallback(
       async (next: { takeProfitPrice: number | null; stopLossPrice: number | null }) => {
@@ -210,7 +213,11 @@ export function PhoenixPositionSheet({
             stopLossPrice: next.stopLossPrice,
             // Sends the levels to the Sandwich's isolated child. Omitted for a
             // standalone position, which is in the parent cross account.
-            ...(context ? { perpSandwichPositionId: context.positionId } : {}),
+            ...(context
+              ? { perpSandwichPositionId: context.positionId }
+              : position.subaccountIndex
+                ? { subaccountIndex: position.subaccountIndex }
+                : {}),
           });
           await signAndSendBase64WithResult(wallet, built.transaction, {
             lastValidBlockHeight: built.lastValidBlockHeight,
@@ -289,7 +296,8 @@ export function PhoenixPositionSheet({
     useEffect(() => {
       if (!live || !position) return;
       const symbolKey = position.symbol.trim().toUpperCase();
-      const subaccountIndex = context?.subaccountIndex ?? null;
+      // A Sandwich leg's child, else a standalone isolated position's own child.
+      const subaccountIndex = context?.subaccountIndex ?? position.subaccountIndex ?? null;
       let cancelled = false;
 
       const tick = async () => {

@@ -18,6 +18,7 @@ import { isDemoMode } from '@/lib/demo/demo-config';
 import {
   inferPhoenixPositionLeverage,
   loadPhoenixPositionLeverages,
+  roundLeverage,
 } from '@/lib/phoenix-position-leverage';
 
 function getApiBaseUrl(): string {
@@ -320,6 +321,13 @@ export type PhoenixPosition = {
   leverage?: number | null;
   /** User-entered margin tracked by Bread so Holdings can show margin + PnL. */
   marginUsd?: number | null;
+  /**
+   * Set when this is a STANDALONE position in its own isolated child. Its
+   * margin and leverage then come straight from the child's on-chain
+   * collateral, and close / auto-close must target this child. Absent for a
+   * position on the cross account.
+   */
+  subaccountIndex?: number | null;
   /** Signed — negative is short. */
   positionSize: number;
   entryPrice: number;
@@ -388,7 +396,48 @@ export type PhoenixAccountResponse = {
   session: { status: string; accessExpiresAt: string } | null;
   legacyInvite: PhoenixLegacyInviteStatus;
   account: PhoenixAccountState;
+  /**
+   * Isolated children holding standalone perps (not Sandwich legs). Absent
+   * from backends that predate isolated standalone perps.
+   */
+  standaloneSubaccountIndices?: number[];
 };
+
+/** The standalone isolated children in an account response. */
+export function phoenixStandaloneChildren(response: PhoenixAccountResponse | null | undefined): PhoenixSubaccount[] {
+  if (!response?.account.registered) return [];
+  const indices = new Set(response.standaloneSubaccountIndices ?? []);
+  return response.account.subaccounts.filter((subaccount) => indices.has(subaccount.subaccountIndex));
+}
+
+/**
+ * Every standalone perp the user holds: cross-account positions (opened before
+ * standalone perps went isolated) plus each standalone child's position. Perp
+ * Sandwich legs are excluded — they render as their Sandwich.
+ */
+export function phoenixStandalonePositions(
+  response: PhoenixAccountResponse | null | undefined,
+): PhoenixPosition[] {
+  if (!response?.account.registered) return [];
+  return [
+    ...(response.account.cross?.positions ?? []),
+    ...phoenixStandaloneChildren(response).flatMap((subaccount) => subaccount.positions),
+  ];
+}
+
+/**
+ * What the standalone children are worth: open positions at collateral + PnL,
+ * plus collateral an exchange-side exit left idle (it is swept back to the
+ * perps balance by the next open or withdrawal).
+ */
+export function phoenixStandaloneChildrenValue(
+  response: PhoenixAccountResponse | null | undefined,
+): number {
+  return phoenixStandaloneChildren(response).reduce(
+    (sum, subaccount) => sum + Math.max(0, subaccount.portfolioValue),
+    0,
+  );
+}
 
 /**
  * The signed-in user's Phoenix account.
@@ -426,11 +475,28 @@ export async function getPhoenixAccount(): Promise<PhoenixAccountResponse> {
     const markets = new Map(
       marketList.map((market) => [market.symbol.trim().toUpperCase(), market]),
     );
+    const standalone = new Set(response.standaloneSubaccountIndices ?? []);
     const enrichSubaccount = (subaccount: PhoenixSubaccount): PhoenixSubaccount => ({
       ...subaccount,
       positions: subaccount.positions.map((position) => {
         const symbol = position.symbol.trim().toUpperCase();
         const market = markets.get(symbol);
+        const identity = market
+          ? { name: market.name, logoUri: market.logoUri, iconUri: market.iconUri ?? null }
+          : {};
+        if (standalone.has(subaccount.subaccountIndex)) {
+          // An isolated child holds exactly this position's margin, so both
+          // figures are read from chain — no device ledger, no inference.
+          const notional = Math.abs(position.positionSize * position.entryPrice);
+          const margin = subaccount.collateralBalance;
+          return {
+            ...position,
+            ...identity,
+            subaccountIndex: subaccount.subaccountIndex,
+            marginUsd: margin > 0 ? margin : null,
+            leverage: margin > 0 && notional > 0 ? roundLeverage(notional / margin) : null,
+          };
+        }
         const storedTrade = leverageLedger[symbol];
         const entryNotionalUsd = Math.abs(position.positionSize * position.entryPrice);
         const inferredLeverage =
@@ -443,9 +509,7 @@ export async function getPhoenixAccount(): Promise<PhoenixAccountResponse> {
         const leverage = storedTrade?.leverage ?? inferredLeverage;
         return {
           ...position,
-          ...(market
-            ? { name: market.name, logoUri: market.logoUri, iconUri: market.iconUri ?? null }
-            : {}),
+          ...identity,
           leverage,
           marginUsd:
             storedTrade?.marginUsd ??
@@ -598,7 +662,9 @@ export async function buildPhoenixMarketOrder(input: {
   takeProfitPrice?: number | null;
   stopLossPrice?: number | null;
 }): Promise<PhoenixOrderBuild> {
-  return phoenixPost<PhoenixOrderBuild>('/orders/market/build', input);
+  // Always isolated: the position gets its own child, so its margin and
+  // leverage are on chain instead of guessed from the shared cross pool.
+  return phoenixPost<PhoenixOrderBuild>('/orders/market/build', { ...input, isolated: true });
 }
 
 /**
@@ -651,6 +717,8 @@ export async function buildPhoenixTpSl(input: {
    * sending an index would let a caller aim instructions at any of their leases.
    */
   perpSandwichPositionId?: string;
+  /** A standalone isolated position's child; the server checks it is yours. */
+  subaccountIndex?: number;
 }): Promise<PhoenixTpSlBuild> {
   return phoenixPost<PhoenixTpSlBuild>('/positions/tpsl/build', input);
 }
@@ -705,9 +773,12 @@ export async function confirmPhoenixClose(
 export async function buildPhoenixClosePosition(
   symbol: string,
   fraction?: number,
+  /** The standalone isolated child holding it; omit for a cross position. */
+  subaccountIndex?: number | null,
 ): Promise<PhoenixCloseBuild> {
   return phoenixPost<PhoenixCloseBuild>('/positions/close/build', {
     symbol,
     ...(fraction !== undefined ? { fraction } : {}),
+    ...(subaccountIndex ? { subaccountIndex } : {}),
   });
 }

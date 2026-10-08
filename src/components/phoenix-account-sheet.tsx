@@ -16,6 +16,8 @@ import {
   buildPhoenixWithdraw,
   getPhoenixAccount,
   PhoenixApiError,
+  phoenixStandaloneChildren,
+  phoenixStandaloneChildrenValue,
   registerPhoenixAccount,
 } from '@/lib/phoenix-api';
 
@@ -51,12 +53,27 @@ export const PhoenixAccountSheet = React.forwardRef<
       try {
         const response = await getPhoenixAccount();
         const cross = response.account.registered ? response.account.cross : null;
-        const withdrawable = Math.max(0, cross?.effectiveCollateralForWithdrawals ?? 0);
+        // Standalone perps sit in isolated children. An idle child's leftover
+        // collateral is swept back by the withdraw build, so it is withdrawable;
+        // a child still holding a position is all margin.
+        const children = phoenixStandaloneChildren(response);
+        const idle = children.filter(
+          (child) =>
+            child.openOrderCount === 0 &&
+            child.positions.every((position) => position.positionSize === 0),
+        );
+        const withdrawable =
+          Math.max(0, cross?.effectiveCollateralForWithdrawals ?? 0) +
+          idle.reduce((sum, child) => sum + Math.max(0, child.effectiveCollateralForWithdrawals), 0);
+        const effective =
+          (cross?.effectiveCollateral ?? 0) +
+          children.reduce((sum, child) => sum + Math.max(0, child.effectiveCollateral), 0);
         return {
           active: response.account.registered,
-          balanceUsd: cross?.portfolioValue ?? 0,
+          balanceUsd:
+            (cross?.portfolioValue ?? 0) + phoenixStandaloneChildrenValue(response),
           withdrawableUsd: withdrawable,
-          inMarginUsd: Math.max(0, (cross?.effectiveCollateral ?? 0) - withdrawable),
+          inMarginUsd: Math.max(0, effective - withdrawable),
           minDepositUsd: MIN_MOVE_USD,
           minWithdrawUsd: MIN_MOVE_USD,
         };

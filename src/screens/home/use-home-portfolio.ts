@@ -11,7 +11,11 @@ import {
 } from "@/lib/api";
 import { sumHoldingsUsd } from "@/lib/holdings";
 import { hasLivePerpSandwichExposure } from "@/lib/perp-sandwich-visibility";
-import { getPhoenixAccount, type PhoenixAccountResponse } from "@/lib/phoenix-api";
+import {
+  getPhoenixAccount,
+  phoenixStandaloneChildrenValue,
+  type PhoenixAccountResponse,
+} from "@/lib/phoenix-api";
 import { useWalletStore } from "@/lib/wallet-store";
 
 // The range picker is gone (it only ever drove a chart, which is gone too), so
@@ -114,6 +118,8 @@ export function useHomePortfolio(): HomePortfolio {
     () =>
       cash.totalCash +
       Math.max(0, phoenixAccount?.account.cross?.portfolioValue ?? 0) +
+      // Standalone perps each live in their own isolated child.
+      phoenixStandaloneChildrenValue(phoenixAccount) +
       // Same predicate as the Holdings rows below, so the headline can never
       // count collateral for a position the list refuses to show.
       perpSandwichPositions
@@ -125,7 +131,7 @@ export function useHomePortfolio(): HomePortfolio {
     [
       cash.totalCash,
       perpSandwichPositions,
-      phoenixAccount?.account.cross?.portfolioValue,
+      phoenixAccount,
       walletStore.tokens,
       walletStore.solTraded,
     ],

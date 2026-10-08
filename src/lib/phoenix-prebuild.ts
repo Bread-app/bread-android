@@ -55,8 +55,8 @@ function orderKey(input: OrderInput): string {
   ]);
 }
 
-function closeKey(symbol: string, fraction: number): string {
-  return JSON.stringify([symbol.trim().toUpperCase(), fraction.toFixed(6)]);
+function closeKey(symbol: string, fraction: number, subaccountIndex?: number | null): string {
+  return JSON.stringify([symbol.trim().toUpperCase(), fraction.toFixed(6), subaccountIndex ?? null]);
 }
 
 function isFresh(entry: Entry<unknown> | null, key: string): boolean {
@@ -107,10 +107,14 @@ export async function takePhoenixOrderBuild(
 }
 
 /** Start (or keep) a background build for closing `fraction` of `symbol`. */
-export function prebuildPhoenixClose(symbol: string, fraction: number): void {
-  const key = closeKey(symbol, fraction);
+export function prebuildPhoenixClose(
+  symbol: string,
+  fraction: number,
+  subaccountIndex?: number | null,
+): void {
+  const key = closeKey(symbol, fraction, subaccountIndex);
   if (isFresh(closeEntry, key)) return;
-  const promise = buildPhoenixClosePosition(symbol, fraction);
+  const promise = buildPhoenixClosePosition(symbol, fraction, subaccountIndex);
   const entry: Entry<PhoenixCloseBuild> = { key, startedAt: Date.now(), promise };
   promise.catch(() => {
     if (closeEntry === entry) closeEntry = null;
@@ -123,10 +127,12 @@ export async function takePhoenixCloseBuild(
   symbol: string,
   fraction: number,
   liveMark: number | null | undefined,
+  /** The standalone isolated child holding the position; omit for cross. */
+  subaccountIndex?: number | null,
 ): Promise<PhoenixCloseBuild> {
   const entry = closeEntry;
   closeEntry = null;
-  if (isFresh(entry, closeKey(symbol, fraction))) {
+  if (isFresh(entry, closeKey(symbol, fraction, subaccountIndex))) {
     try {
       const built = await entry!.promise;
       if (markStillClose(built.preview.markPrice, liveMark)) return built;
@@ -134,5 +140,5 @@ export async function takePhoenixCloseBuild(
       // Fall through to a fresh build.
     }
   }
-  return buildPhoenixClosePosition(symbol, fraction);
+  return buildPhoenixClosePosition(symbol, fraction, subaccountIndex);
 }

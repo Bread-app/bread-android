@@ -173,6 +173,7 @@ import { useThemedStyles } from "@/hooks/use-themed-styles";
 import {
   confirmPhoenixClose,
   getPhoenixAccount,
+  phoenixStandalonePositions,
   type PhoenixAccountResponse,
   type PhoenixPosition,
 } from "@/lib/phoenix-api";
@@ -1396,7 +1397,12 @@ export function ProfileScreen() {
         //
         // The close pad pre-builds while the user slides, so this is usually
         // already done; see lib/phoenix-prebuild.
-        const built = await takePhoenixCloseBuild(symbol, fraction, exitPrice);
+        const built = await takePhoenixCloseBuild(
+          symbol,
+          fraction,
+          exitPrice,
+          position.subaccountIndex,
+        );
         const sent = await signAndSendBase64WithResult(wallet, built.transaction, {
           lastValidBlockHeight: built.lastValidBlockHeight,
           requireConfirmed: true,
@@ -1977,7 +1983,7 @@ export function ProfileScreen() {
         ...perpSandwichPositions.map((position) => position.sandwich.id),
         // A bare Phoenix position has no sandwich; its takes are filed under
         // its market symbol, which is what the server resolves it to.
-        ...(phoenixAccount?.account.cross?.positions ?? []).map((position) => position.symbol.toUpperCase()),
+        ...phoenixStandalonePositions(phoenixAccount).map((position) => position.symbol.toUpperCase()),
       ].join(","),
     [sandwichRows, perpSandwichPositions, phoenixAccount],
   );
@@ -2965,7 +2971,7 @@ export function ProfileScreen() {
   const visiblePerpSandwichPositions = perpSandwichPositions.filter(
     hasLivePerpSandwichExposure,
   );
-  const visiblePhoenixPositions = (phoenixAccount?.account.cross?.positions ?? []).filter(
+  const visiblePhoenixPositions = phoenixStandalonePositions(phoenixAccount).filter(
     (position) =>
       Math.abs(position.positionSize) > 0 && Math.abs(position.positionValue) >= DUST_USD,
   );
@@ -3812,7 +3818,7 @@ export function ProfileScreen() {
                     ? null
                     : position.marginUsd + position.unrealizedPnl;
                 return (
-                  <View key={`phoenix:${symbol}`}>
+                  <View key={`phoenix:${position.subaccountIndex ?? 0}:${symbol}`}>
                   <PressableScale
                     accessibilityRole="button"
                     accessibilityLabel={`${displayName} ${side} position details`}

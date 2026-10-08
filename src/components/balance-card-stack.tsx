@@ -23,7 +23,7 @@ import { Fonts } from "@/constants/theme";
 import { ValueSkeleton } from "@/components/value-skeleton";
 import { getHyperliquidAccount, HyperliquidApiError } from "@/lib/hyperliquid-api";
 import { PERPS_VENUE, type PerpsVenue } from "@/lib/perps-venue";
-import { getPhoenixAccount, PhoenixApiError } from "@/lib/phoenix-api";
+import { getPhoenixAccount, PhoenixApiError, phoenixStandaloneChildren } from "@/lib/phoenix-api";
 
 const EMPTY_PERP_SUMMARY: PerpCardSummary = {
   registered: false,
@@ -67,14 +67,27 @@ async function loadPerpSummary(venue: PerpsVenue): Promise<PerpCardSummary> {
   try {
     const data = await getPhoenixAccount();
     const cross = data.account.cross;
+    // Standalone perps live in their own isolated children. An idle child's
+    // collateral (left by a stop or take profit) is swept back by the
+    // withdraw build, so it counts as withdrawable.
+    const children = phoenixStandaloneChildren(data);
+    const sum = (pick: (child: (typeof children)[number]) => number) =>
+      children.reduce((total, child) => total + pick(child), 0);
+    const idle = (child: (typeof children)[number]) =>
+      child.positions.every((position) => position.positionSize === 0) &&
+      child.openOrderCount === 0;
     return {
       registered: data.account.registered,
-      portfolioValue: cross?.portfolioValue ?? 0,
-      collateral: cross?.collateralBalance ?? 0,
-      withdrawable: cross?.effectiveCollateralForWithdrawals ?? 0,
-      unrealizedPnl: cross?.unrealizedPnl ?? 0,
-      positionCount: cross?.positions.length ?? 0,
-      openOrderCount: cross?.openOrderCount ?? 0,
+      portfolioValue: (cross?.portfolioValue ?? 0) + sum((child) => Math.max(0, child.portfolioValue)),
+      collateral: (cross?.collateralBalance ?? 0) + sum((child) => child.collateralBalance),
+      withdrawable:
+        (cross?.effectiveCollateralForWithdrawals ?? 0) +
+        sum((child) => (idle(child) ? Math.max(0, child.effectiveCollateralForWithdrawals) : 0)),
+      unrealizedPnl: (cross?.unrealizedPnl ?? 0) + sum((child) => child.unrealizedPnl),
+      positionCount:
+        (cross?.positions.length ?? 0) +
+        sum((child) => child.positions.filter((position) => position.positionSize !== 0).length),
+      openOrderCount: (cross?.openOrderCount ?? 0) + sum((child) => child.openOrderCount),
     };
   } catch (error) {
     // "No wallet yet" and "not signed in" are not failures — there is simply
