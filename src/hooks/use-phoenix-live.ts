@@ -50,8 +50,6 @@ const CANDLE_POLL_MS = 15_000;
 const CANDLE_HISTORY = 400;
 /** First retry delay after a failed poll; doubles up to the poll interval. */
 const RETRY_BASE_MS = 1_500;
-/** A 24h change barely moves minute to minute; deriving it more often is waste. */
-const CHANGE_DERIVE_MS = 60_000;
 
 /** True while the app is in the foreground. Polling is gated on it. */
 function useIsForeground(): boolean {
@@ -269,11 +267,6 @@ export function usePhoenixLivePrices(
   // render that happens to build a new array.
   const key = symbols.slice(0, PHOENIX_MAX_PRICE_BATCH).join(',');
 
-  // Symbols whose 24h change the batch endpoint did not carry. Older backends
-  // return prices only, so the change is derived here from daily candles rather
-  // than leaving the list showing a dash until the API catches up.
-  const derivedRef = useRef<Record<string, number>>({});
-
   const tick = useCallback(async () => {
     if (!key) return;
     const { prices: next, changes: nextChanges } = await getPhoenixPrices(key.split(','));
@@ -301,44 +294,13 @@ export function usePhoenixLivePrices(
 
   usePoll(tick, PRICE_POLL_MS, enabled && foreground && key.length > 0);
 
-  // Fallback pass: one daily-candle pair per symbol the batch didn't cover, at
-  // most once a minute each. A 24h change moves slowly enough that this is far
-  // cheaper than it looks, and it stops as soon as the API supplies the field.
-  const deriveChanges = useCallback(async () => {
-    if (!key) return;
-    const now = Date.now();
-    const stale = key
-      .split(',')
-      .filter((symbol) => (derivedRef.current[symbol] ?? 0) < now - CHANGE_DERIVE_MS)
-      .slice(0, PHOENIX_MAX_PRICE_BATCH);
-    if (stale.length === 0) return;
+  // There used to be a fallback here that fetched daily candles for every
+  // symbol the batch returned no 24h change for. The backend already derives
+  // the change from those same candles, and it omits it precisely when Phoenix
+  // is rate limiting — so the fallback fired a burst of 8-10 more requests into
+  // a drained bucket and starved order builds into 429s. A row now shows a dash
+  // until the next batch carries the change.
 
-    const results = await Promise.allSettled(
-      stale.map(async (symbol) => {
-        const candles = await getPhoenixCandles(symbol, '1d', 2);
-        return { symbol, change: change24hFromCandles(candles) };
-      }),
-    );
-
-    const derived: Record<string, PhoenixChange24h> = {};
-    for (const result of results) {
-      if (result.status !== 'fulfilled' || result.value.change === null) continue;
-      derived[result.value.symbol] = result.value.change;
-      derivedRef.current[result.value.symbol] = now;
-    }
-    if (Object.keys(derived).length === 0) return;
-
-    // Never overwrite a value the API did supply — that one is authoritative.
-    setChanges((current) => {
-      const merged = { ...current };
-      for (const [symbol, change] of Object.entries(derived)) {
-        if (!merged[symbol]) merged[symbol] = change;
-      }
-      return merged;
-    });
-  }, [key]);
-
-  usePoll(deriveChanges, CHANGE_DERIVE_MS, enabled && foreground && key.length > 0);
 
   return { prices, changes };
 }
@@ -379,15 +341,6 @@ export function usePhoenixRotatingPrices(
   // The underlying hook keeps every symbol's last good value across windows,
   // so rows priced on an earlier page keep their numbers.
   return usePhoenixLivePrices(window, enabled);
-}
-
-/** Two daily closes is all a 24h change is. */
-function change24hFromCandles(candles: PhoenixCandle[]): PhoenixChange24h | null {
-  if (candles.length < 2) return null;
-  const [previous, current] = candles.slice(-2);
-  if (!previous.markClose) return null;
-  const changeUsd = current.markClose - previous.markClose;
-  return { changeUsd, changePercent: (changeUsd / previous.markClose) * 100 };
 }
 
 export type PhoenixLiveMarket = {

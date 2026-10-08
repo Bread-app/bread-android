@@ -51,6 +51,19 @@ describe('sendSignedSolanaTransaction', () => {
     });
   });
 
+  it('treats an expired blockhash as a definite failure, without a second request', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(response({ signature: 'sig-x', status: 'expired' }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(
+      sendSignedSolanaTransaction('signed-base64', {
+        fastConfirm: true,
+        requireConfirmed: true,
+      }),
+    ).rejects.toMatchObject({ code: 'TRANSACTION_EXPIRED' });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it('does not make a second request when the fast response already landed', async () => {
     const fetchMock = vi.fn().mockResolvedValue(response({
       signature: 'sig-processed',

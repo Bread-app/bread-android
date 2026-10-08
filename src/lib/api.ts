@@ -279,6 +279,14 @@ export function isLandedTxStatus(status: string | null): boolean {
 const TRANSACTION_PENDING_MESSAGE =
   "Trade submitted and is still confirming. Don't retry yet—refresh your balance in a moment.";
 
+/**
+ * The backend reports `expired` once the transaction's blockhash is past its
+ * last valid height and it never landed. Unlike `pending`, that is definite:
+ * nothing happened and nothing can happen, so retrying is safe.
+ */
+const TRANSACTION_EXPIRED_MESSAGE =
+  "The network didn't pick up this transaction, so nothing happened. Please try again.";
+
 export type CoinGeckoCandle = {
   timestamp: number;
   open: number;
@@ -685,6 +693,7 @@ export type ApiErrorCode =
   | 'INVALID_JSON'
   | 'INVALID_RESPONSE'
   | 'TRANSACTION_PENDING'
+  | 'TRANSACTION_EXPIRED'
   | 'ABORTED'
   | 'PODCAST_FAILED'
   | 'PODCAST_NO_CAPTIONS'
@@ -5645,6 +5654,10 @@ export async function sendSignedSolanaTransaction(
 
   let result = await submit(options?.fastConfirm === true);
 
+  if (result.status === 'expired') {
+    throw new ApiError('TRANSACTION_EXPIRED', TRANSACTION_EXPIRED_MESSAGE, undefined, result);
+  }
+
   // fastConfirm is intentionally impatient. During a slow slot it can return
   // `pending` even though the RPC accepted the transaction, which used to make
   // a healthy buy look failed immediately. Keep the fast happy path, then use
@@ -5658,7 +5671,11 @@ export async function sendSignedSolanaTransaction(
   ) {
     try {
       result = await submit(false);
-    } catch {
+      if (result.status === 'expired') {
+        throw new ApiError('TRANSACTION_EXPIRED', TRANSACTION_EXPIRED_MESSAGE, undefined, result);
+      }
+    } catch (error) {
+      if (error instanceof ApiError && error.code === 'TRANSACTION_EXPIRED') throw error;
       // The first request already proved that an RPC accepted the transaction.
       // A timeout/network error during the confirmation pass is ambiguous, not
       // a safe-to-retry failure, so retain the known signature for callers.
