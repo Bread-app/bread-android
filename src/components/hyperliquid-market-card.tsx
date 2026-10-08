@@ -124,5 +124,5 @@ const makeStyles = (c: ThemeColors) =>
     levText: { color: c.textSecondary, fontSize: 10, fontWeight: '800', fontFamily: F },
     rightCol: { alignItems: 'flex-end', marginLeft: 8, gap: 2 },
     priceValue: { color: c.text, fontSize: 20, fontWeight: '700', fontFamily: F, fontVariant: ['tabular-nums'] },
-    change: { fontSize: 13, fontWeight: '800', fontFamily: Fonts.displayMedium, fontVariant: ['tabular-nums'] },
+    change: { fontSize: 13, fontWeight: '700', fontFamily: F, fontVariant: ['tabular-nums'] },
   });

@@ -85,6 +85,14 @@ type Step = 'method' | 'crypto_network' | 'solana_deposit' | 'chain_deposit' | '
 
 type FiatMethod = 'apple_pay' | 'debit';
 
+/** Which Privy card on-ramp each fiat method opens. */
+const ONRAMP_PROVIDER = {
+  apple_pay: 'coinbase',
+  debit: 'moonpay',
+} as const satisfies Record<FiatMethod, 'coinbase' | 'moonpay'>;
+
+const ONRAMP_PROVIDER_LABEL = { coinbase: 'Coinbase', moonpay: 'MoonPay' } as const;
+
 // Solana sits at the top of the network list as a direct deposit to the user's
 // own wallet; the chains below it generate a Relay deposit address.
 const SOLANA_NETWORK = {
@@ -465,10 +473,10 @@ export function DepositFlow({
         asset: 'USDC',
         amount,
         defaultPaymentMethod: 'card',
-        // Coinbase Onramp surfaces card, Apple Pay and bank inside its own
-        // checkout. Requires Coinbase Onramp to be enabled for the app in the
-        // Privy dashboard.
-        card: { preferredProvider: 'coinbase' },
+        // Coinbase's guest checkout is card / Apple Pay only, so bank transfers
+        // go to MoonPay, whose checkout offers ACH and SEPA. Both providers are
+        // enabled for the app in the Privy dashboard (Account Funding).
+        card: { preferredProvider: ONRAMP_PROVIDER[fiatMethod] },
       });
     } catch (e) {
       // The user dismissing the funding modal can reject the promise — only
@@ -777,7 +785,7 @@ export function DepositFlow({
         <TradeAmountPad
           onBack={() => setStep('method')}
           title={fiatMethod === 'apple_pay' ? 'Card' : 'Bank transfer'}
-          subtitleLabel="Checkout by Coinbase · fee shown before you pay"
+          subtitleLabel={`Checkout by ${ONRAMP_PROVIDER_LABEL[ONRAMP_PROVIDER[fiatMethod]]} · fee shown before you pay`}
           accentColor={colors.actionBuy}
           amount={amount}
           amountUnitSymbol="$"

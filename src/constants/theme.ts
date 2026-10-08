@@ -78,16 +78,15 @@ export const Colors: { light: ThemeColors; dark: ThemeColors } = {
     accentDeep: '#02ED45',
     accentBlue: '#38BDF8',
     positive: '#02ED45',
-    negative: '#D2042D',
+    negative: '#EB1C40',
     actionPrimary: '#38BDF8',
     actionPrimaryText: '#FFFFFF',
     actionBuy: '#35F046',
-    actionSell: '#D2042D',
+    actionSell: '#EB1C40',
     chartPositive: '#35F046',
-    // A step brighter than the cherry red the sell/negative tokens carry: on a
-    // chart it is a 1-2pt line, not a filled pill, and the deeper tone read as
-    // muddy against both grounds.
-    chartNegative: '#E8213F',
+    // Same crimson as negative/actionSell: one red for every loss and bearish
+    // surface (text, pills, chart lines, candles).
+    chartNegative: '#EB1C40',
     chartNeutral: '#94A3B8',
     chartGrid: '#E8EEF4',
     chartCrosshair: '#10223D',
@@ -115,13 +114,13 @@ export const Colors: { light: ThemeColors; dark: ThemeColors } = {
     accentBlue: '#38BDF8',
     // Green for text/status is unified app-wide (graphs keep chartPositive).
     positive: '#02ED45',
-    negative: '#D2042D',
+    negative: '#EB1C40',
     actionPrimary: '#38BDF8',
     actionPrimaryText: '#FFFFFF',
     actionBuy: '#35F046',
-    actionSell: '#D2042D',
+    actionSell: '#EB1C40',
     chartPositive: '#35F046',
-    chartNegative: '#E8213F',
+    chartNegative: '#EB1C40',
     chartNeutral: '#7C828C',
     chartGrid: '#2A2C31',
     chartCrosshair: '#E6E8EB',

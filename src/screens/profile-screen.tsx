@@ -45,7 +45,7 @@ import { settleJupUsdToCash, signAndSendBase64WithResult } from "@/lib/cash";
 import { useCash } from "@/hooks/use-cash";
 import { PnlChart } from "@/components/portfolio-value-chart";
 import { type TakeComposerTarget } from "@/lib/position-takes";
-import { useStockDetail } from "@/lib/stock-detail-store";
+import { StockDetailSheet, type StockDetailSheetRef } from "@/components/stock-detail-sheet";
 import { AssetLogo } from "@/components/asset-logo";
 import { ClosedPositionRow } from "@/components/closed-position-row";
 import {
@@ -123,6 +123,7 @@ import {
   SandwichShareSheet,
   type SandwichShareSheetRef,
 } from '@/components/sandwich-share-sheet';
+import { optimisticOpenSandwichPositionDetail } from "@/lib/open-sandwich-position";
 import { useSandwichDetail } from '@/lib/sandwich-detail-store';
 import type { PodcastGroupVideo } from '@/components/podcast-sandwich-group-card';
 import { usePodcastGroup } from '@/lib/podcast-group-store';
@@ -213,11 +214,33 @@ const F = Fonts.rounded;
 // Realized P&L graph (own profile) — mirrors the other-user profile screen.
 const PORTFOLIO_RANGES: PortfolioRange[] = ["24H", "7d", "30d"];
 const PORTFOLIO_UP = "#02ED45";
-const PORTFOLIO_DOWN = "#D2042D";
+const PORTFOLIO_DOWN = "#EB1C40";
 
 // Hide dust holdings: anything under this USD value rounds to "$0.00" and reads
 // as a placeholder row, so we drop it from the Holdings list entirely.
 const DUST_USD = HOLDINGS_DUST_USD;
+
+/**
+ * Whether the wallet plainly still holds a backend position: every leg's mint
+ * is held, and together they're worth at least a quarter of what went in — so
+ * the dust a sell leaves behind never resurrects a Sandwich that was exited.
+ */
+function isPositionBackedByWallet(
+  position: { investedUsd: number | null; legs: Array<{ mint: string }> },
+  tokens: WalletBalanceToken[],
+): boolean {
+  if (position.legs.length === 0) return false;
+  const byMint = new Map(
+    tokens.filter((token) => token.mint && token.balance > 0).map((token) => [token.mint as string, token]),
+  );
+  if (!position.legs.every((leg) => byMint.has(leg.mint))) return false;
+  if (!position.investedUsd || position.investedUsd <= 0) return true;
+  const heldUsd = [...new Set(position.legs.map((leg) => leg.mint))].reduce(
+    (sum, mint) => sum + (byMint.get(mint)?.usdValue ?? 0),
+    0,
+  );
+  return heldUsd >= position.investedUsd * 0.25;
+}
 
 // How long a focus-triggered refresh may reuse the last on-chain read. Balances
 // move only when the user trades or receives funds — and both of those paths
@@ -587,6 +610,9 @@ export function ProfileScreen() {
   const [copiedAddress, setCopiedAddress] = useState<string | null>(null);
   const walletStore = useWalletStore();
   const balanceTokens = walletStore.tokens;
+  // Read inside the positions fetch without making every balance poll refetch it.
+  const balanceTokensRef = useRef(balanceTokens);
+  balanceTokensRef.current = balanceTokens;
   const balanceLoading = walletStore.loading;
   const balanceHasLoaded = walletStore.hasLoaded;
   const balanceError = walletStore.error;
@@ -712,7 +738,7 @@ export function ProfileScreen() {
   const positionDetailSheetRef = useRef<PositionDetailSheetRef>(null);
   const [focusedPosition, setFocusedPosition] =
     useState<FocusedPositionData | null>(null);
-  const { open: openStockRoute } = useStockDetail();
+  const stockDetailSheetRef = useRef<StockDetailSheetRef>(null);
   const sandwichTradeSheetRef = useRef<TradeAmountSheetRef>(null);
   const positionShareSheetRef = useRef<PositionShareSheetRef>(null);
 
@@ -832,11 +858,11 @@ export function ProfileScreen() {
       volume24h: null,
     };
 
-    // The full asset screen, same as Home and Search push — it reads the
+    // A holding opens as a sheet, like every other Holdings row — it reads the
     // holding, cost basis and Sell affordance off the wallet store itself.
     void Haptics.selectionAsync();
-    openStockRoute(stock, { source: null });
-  }, [openStockRoute]);
+    stockDetailSheetRef.current?.open(stock);
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -964,7 +990,9 @@ export function ProfileScreen() {
       const backendPositions = await getUserPortfolio(user.id).catch(() => null);
       if (!isCurrent || backendPositions === null) return;
 
-      const merged = await seedFromBackend(walletAddress, backendPositions);
+      const merged = await seedFromBackend(walletAddress, backendPositions, (position) =>
+        isPositionBackedByWallet(position, balanceTokensRef.current),
+      );
       bootstrappedPortfolioOwner.current = portfolioOwnerKey;
       if (isCurrent) setSandwichPositions(merged);
     })();
@@ -1056,6 +1084,26 @@ export function ProfileScreen() {
         .join(","),
     [balanceTokens],
   );
+
+  // A Sandwich bought off-device (a DM "buy $5", a Like→Buy fill) lands in the
+  // wallet before this screen has heard of the position: the positions fetch
+  // ran on focus, the balance poll then brings in the new mint, and it renders
+  // as a loose token that can't be sold as the Sandwich. When a held mint
+  // appears that no stored position claims, re-read the positions once.
+  const lastUnclaimedRefetch = useRef<string | null>(null);
+  useEffect(() => {
+    if (!heldMintSignature || sandwichPositions === null) return;
+    const claimed = new Set(
+      sandwichPositions.flatMap((position) => position.legs.map((leg) => leg.mint)),
+    );
+    const unclaimed = heldMintSignature
+      .split(",")
+      .filter((mint) => mint && !claimed.has(mint))
+      .join(",");
+    if (!unclaimed || unclaimed === lastUnclaimedRefetch.current) return;
+    lastUnclaimedRefetch.current = unclaimed;
+    setSandwichRefreshKey((value) => value + 1);
+  }, [heldMintSignature, sandwichPositions]);
 
   // "Loaded, and the user holds no stored sandwich" — the only state in which
   // recovery from the public catalog is worth attempting.
@@ -1160,7 +1208,7 @@ export function ProfileScreen() {
       const dropped = sandwichPositions.filter((position) => !backed.includes(position));
       void Promise.all(
         dropped.map((position) =>
-          removeStoredSandwichPosition(primarySolanaAddress, position.id),
+          removeStoredSandwichPosition(primarySolanaAddress, position.id, { tombstone: false }),
         ),
       ).then(() => setSandwichPositions(backed));
     }
@@ -3191,40 +3239,62 @@ export function ProfileScreen() {
   }
 
   /**
-   * A held podcast call opens as one bounded moment. The full multi-call episode
-   * is deliberately one link deeper; non-video Sandwiches keep their shared
-   * detail route.
+   * Every open Sandwich — podcast call, X post or composed — opens the same
+   * position sheet a closed one does: the source, the chart since entry, the
+   * result, Buy More / Close. The sheet goes up on the tap from what the row
+   * already knows; the server ledger (fills, entry prices) and the Sandwich
+   * fill it in place, and either may fail without closing it.
    */
-  async function openSandwichScreen(row: SandwichHoldingRow): Promise<void> {
+  async function openActivePosition(row: SandwichHoldingRow): Promise<void> {
     void Haptics.selectionAsync();
     const sandwichId = row.position.sandwichId;
-    // The selection only feeds the trade sheets reached FROM the detail screen,
-    // so it must not hold up the push. Set synchronously it re-rendered this
-    // whole screen before the navigation's frame could run — the tap lag.
-    startTransition(() => setSelectedSandwichRow(row));
-    const provenance = sandwichProvenance[sandwichId] ?? null;
-    if (provenance?.source.sourceType === "youtube") {
-      const knownSandwich =
-        holdingSandwiches[sandwichId] ?? recoverySandwichById.get(sandwichId) ?? null;
-      setPodcastHoldingMoment({
-        row,
-        position: row.position,
-        provenance,
-        sandwich: knownSandwich,
-        currentValueUsd: row.usdValue,
-        returnPct: row.returnPct,
-      });
-      return;
-    }
-    const sandwich =
-      holdingSandwiches[sandwichId] ??
-      recoverySandwichById.get(sandwichId) ??
-      (await getSandwichById(sandwichId, anonymousId).catch(() => null));
-    if (!sandwich) {
-      showToast({ text: "This sandwich is no longer public", tone: "error" });
-      return;
-    }
-    sandwichDetail.open(sandwich, { position: row.position });
+    const knownSandwich =
+      holdingSandwiches[sandwichId] ?? recoverySandwichById.get(sandwichId) ?? null;
+    const knownProvenance = sandwichProvenance[sandwichId] ?? null;
+    const positionMetrics = {
+      currentValueUsd: row.usdValue,
+      pnlUsd:
+        row.position.investedUsd === null
+          ? null
+          : row.usdValue - row.position.investedUsd,
+      pnlPct: row.returnPct,
+    };
+    const fallbackDetail = optimisticOpenSandwichPositionDetail({
+      position: row.position,
+      sandwich: knownSandwich,
+      provenance: knownProvenance,
+    });
+    const initial: FocusedPositionData = {
+      detail: fallbackDetail,
+      sandwich: knownSandwich,
+      provenance: knownProvenance,
+      ...positionMetrics,
+    };
+    positionDetailSheetRef.current?.present(initial);
+    startTransition(() => {
+      setSelectedSandwichRow(row);
+      setFocusedPosition(initial);
+    });
+
+    const [detailResult, sandwichResult] = await Promise.allSettled([
+      getOpenSandwichPositionDetail(sandwichId),
+      knownSandwich
+        ? Promise.resolve(knownSandwich)
+        : getSandwichById(sandwichId, anonymousId),
+    ]);
+    const detail = detailResult.status === "fulfilled" ? detailResult.value : fallbackDetail;
+    const sandwich = sandwichResult.status === "fulfilled" ? sandwichResult.value : knownSandwich;
+    startTransition(() =>
+      setFocusedPosition((current) => {
+        if (!current || current.detail.id !== fallbackDetail.id) return current;
+        return {
+          detail,
+          sandwich,
+          provenance: knownProvenance ?? positionDetailProvenance(detail),
+          ...positionMetrics,
+        };
+      }),
+    );
   }
 
   async function openClosedPosition(position: ClosedPosition): Promise<void> {
@@ -3633,7 +3703,7 @@ export function ProfileScreen() {
                         }
                         caption={sandwichCaptionFor(row.position.sandwichId)}
                         takes={ownTakesFor(row.position.sandwichId)}
-                        onOpen={() => void openSandwichScreen(row)}
+                        onOpen={() => void openActivePosition(row)}
                       />
                     );
                   })}
@@ -4159,8 +4229,10 @@ export function ProfileScreen() {
         onViewFull={(data) => {
           void viewFullFocusedPosition(data);
         }}
+        onAddThesis={(open) => open()}
       />
       <PositionShareSheet ref={positionShareSheetRef} />
+      <StockDetailSheet ref={stockDetailSheetRef} />
       <Modal
         visible={selectedPerpSandwich !== null}
         transparent

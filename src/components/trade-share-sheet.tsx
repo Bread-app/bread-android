@@ -44,7 +44,7 @@ const INSTAGRAM_APP_ID = process.env.EXPO_PUBLIC_INSTAGRAM_APP_ID ?? '';
 const INSTAGRAM_GRADIENT = ['#FEDA75', '#FA7E1E', '#D62976', '#962FBF'] as const;
 
 const BRAND_GREEN = '#35F046';
-const BRAND_RED = '#D2042D';
+const BRAND_RED = '#EB1C40';
 
 function formatSignedUsd(value: number): string {
   const sign = value >= 0 ? '+' : '-';

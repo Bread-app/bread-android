@@ -75,9 +75,10 @@ import { PressableScale } from "@/components/pressable-scale";
 import { NewsFeed } from "@/components/news/news-feed";
 import { markLegTapHintSeen, shouldShowLegTapHint } from "@/lib/leg-tap-hint";
 import { buildNewsStories, setActiveNewsStory, type NewsStory } from "@/lib/news-feed";
-import { AddThesisButton } from '@/components/add-thesis-button';
+import { SandwichPositionCard } from "@/components/sandwich-position-card";
+import { ScrubReturnText } from "@/components/scrub-return-text";
+import { ComposeFab } from "@/components/compose-fab";
 import { PositionTakesSection } from '@/components/position-takes-section';
-import { takeComposerRoute } from '@/lib/position-takes';
 import { TakeCard } from '@/components/take-card';
 import {
   SafeAreaView,
@@ -198,7 +199,7 @@ import {
 import {
   valueSandwichPosition,
 } from "@/lib/sandwich-holding-value";
-import { useSandwichDetail, type ViewedPosition } from "@/lib/sandwich-detail-store";
+import { useSandwichDetail } from "@/lib/sandwich-detail-store";
 import { usePodcastGroup } from "@/lib/podcast-group-store";
 import { useSandwichComposer } from "@/lib/sandwich-composer-store";
 import { getAnonymousSocialId } from "@/lib/social-identity";
@@ -367,7 +368,6 @@ function FilterLabel({ label, active }: { label: string; active: boolean }) {
 // the thesis copy (per the detail-sheet design spec).
 const F_DISPLAY = Fonts.display;
 const F_DISPLAY_MEDIUM = Fonts.displayMedium;
-const F_DISPLAY_ONE = Fonts.displayOne;
 const F_MONO = Fonts.mono;
 const HAS_GLASS = isGlassEffectAPIAvailable();
 
@@ -3353,7 +3353,7 @@ function getSideMeta(leg: SandwichLeg) {
     : isShortOrNo ? "SHORT" : "LONG";
   const color = isMarket
     ? isShortOrNo ? "#7d3ad6" : "#1d6cd6"
-    : isShortOrNo ? "#D2042D" : "#1f9d6b";
+    : isShortOrNo ? "#EB1C40" : "#1f9d6b";
   return { label, color };
 }
 
@@ -3680,7 +3680,7 @@ function MiniSparkline({ seed, up }: { seed: string; up: boolean }) {
     return { line: linePath, area: areaPath };
   }, [seed, up]);
 
-  const stroke = up ? "#22C55E" : "#E8213F";
+  const stroke = up ? "#22C55E" : "#EB1C40";
   const fill = up ? "rgba(34,197,94,0.12)" : "rgba(255,51,201,0.12)";
 
   return (
@@ -4657,208 +4657,6 @@ export function SandwichSellPad({
   );
 }
 /**
- * How long ago the position was opened. The viewer cares about how long they
- * have held it, not which calendar day they bought on, so this stays relative
- * all the way out rather than falling back to a date the way the feed
- * timestamps do.
- */
-function formatOpenedAgo(iso: string | null | undefined): string {
-  if (!iso) return "—";
-  const then = new Date(iso).getTime();
-  if (!Number.isFinite(then)) return "—";
-  const mins = Math.max(0, Math.round((Date.now() - then) / 60000));
-  if (mins < 1) return "just now";
-  if (mins < 60) return `${mins}m ago`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  if (days < 7) return `${days}d ago`;
-  const weeks = Math.floor(days / 7);
-  if (weeks < 9) return `${weeks}w ago`;
-  const months = Math.floor(days / 30);
-  if (months < 12) return `${months}mo ago`;
-  return `${Math.floor(days / 365)}y ago`;
-}
-/**
- * Portfolio summary shown only when the viewer owns this sandwich. It mirrors
- * the spot-asset position card: value and unrealized PnL lead, while cost and
- * return provide the basis underneath.
- *
- * The return is the SANDWICH's own — its legs' weighted move since it was
- * created, the same `pnlPct` the hero and the chart print — applied to what the
- * viewer put in. It is deliberately not derived from wallet balances: a leg's
- * wallet value covers every source of that mint, so a position holding one slice
- * of it read as if it owned the lot. One number, one source, and the card can
- * never disagree with the percentage above it.
- *
- * The cost is what makes it the viewer's: `invested × (1 + pnlPct)`. Note the
- * window is since the sandwich was CREATED, not since this buy, so a late entry
- * is credited with the move it missed.
- */
-export function SandwichPositionCard({
-  position,
-  sandwich = null,
-  onShare,
-  onAddThesis,
-  valuationOverride,
-}: {
-  position: SandwichPosition;
-  /** The sandwich behind the position — the source of the return shown. */
-  sandwich?: Sandwich | null;
-  /**
-   * Figures for someone else's holding. The viewer's wallet says nothing about
-   * another user's position, so these replace the wallet valuation outright.
-   */
-  valuationOverride?: ViewedPosition["valuation"] | null;
-  onShare: () => void;
-  /**
-   * Wraps the push to the thesis composer. A host that sits in a drawer
-   * passes its close, so the composer lands on a screen and not under a sheet.
-   * Default is a plain push. `null` hides the button.
-   */
-  onAddThesis?: ((open: () => void) => void) | null;
-}) {
-  const styles = useThemedStyles(makeStyles);
-  const { colors } = useThemeStore();
-  const walletStore = useWalletStore();
-  const valuation = valueSandwichPosition(
-    position.legs,
-    new Map(walletStore.tokens.filter((token) => token.mint).map((token) => [token.mint!, token])),
-    walletStore.hasLoaded,
-    position.legs.map((leg) => leg.mint),
-  );
-  const invested = valuationOverride
-    ? valuationOverride.costUsd
-    : valuation.costUsd || position.investedUsd;
-  const returnPct = valuationOverride ? valuationOverride.returnPct : valuation.returnPct;
-  const currentValue = valuationOverride ? valuationOverride.valueUsd : valuation.valueUsd;
-  const pnl = valuationOverride
-    ? valuationOverride.pnlUsd
-    : invested === null || returnPct === null ? null : valuation.pnlUsd;
-  const positive = (pnl ?? 0) >= 0;
-  const accent = positive ? colors.positive : colors.negative;
-  const openedLabel = formatOpenedAgo(position.createdAt);
-  const openThesisComposer = () => {
-    const route = takeComposerRoute({
-      positionKind: "sandwichId",
-      positionId: position.sandwichId,
-      name: position.name,
-      pct: returnPct,
-      valueUsd: currentValue,
-      logoUrl: position.legs[0]?.imageUrl ?? null,
-      openedAt: position.createdAt,
-    });
-    expoRouter.push({ pathname: route.pathname as never, params: route.params });
-  };
-  return (
-    <View
-      style={styles.detailPositionCard}
-    >
-      <View
-        accessible
-        accessibilityLabel={`${valuationOverride ? "This position" : "Your position"} is ${formatMoneyUsd(currentValue) ?? "$0.00"}, ${
-          pnl === null
-            ? "profit and loss unavailable"
-            : `${pnl >= 0 ? "up" : "down"} ${formatMoneyUsd(Math.abs(pnl)) ?? "$0.00"}`
-        }`}
-        style={styles.detailPositionSummary}
-      >
-        <View style={styles.detailPositionHeadline}>
-          <View style={styles.detailPositionValueGroup}>
-            <Text
-              numberOfLines={1}
-              adjustsFontSizeToFit
-              minimumFontScale={0.72}
-              style={styles.detailPositionValue}
-            >
-              {formatMoneyUsd(currentValue) ?? "$0.00"}
-            </Text>
-          </View>
-          <View style={styles.detailPositionPnlGroup}>
-            <Text
-              numberOfLines={1}
-              adjustsFontSizeToFit
-              minimumFontScale={0.72}
-              style={[styles.detailPositionPnl, { color: accent }]}
-            >
-              {pnl === null
-                ? "—"
-                : `${pnl >= 0 ? "+" : "−"}${formatMoneyUsd(Math.abs(pnl)) ?? "$0.00"}`}
-            </Text>
-            <View style={styles.detailPositionReturnRow}>
-              {returnPct !== null ? (
-                <Ionicons
-                  name={positive ? "caret-up" : "caret-down"}
-                  size={13}
-                  color={accent}
-                />
-              ) : null}
-              <Text style={[styles.detailPositionReturn, { color: accent }]}>
-                {returnPct === null ? "—" : `${Math.abs(returnPct).toFixed(2)}%`}
-              </Text>
-            </View>
-          </View>
-        </View>
-        <View style={styles.detailPositionBasisRow}>
-          <View style={styles.detailPositionBasisGroup}>
-            <Text style={styles.detailPositionBasisLabel}>Invested</Text>
-            <Text
-              numberOfLines={1}
-              adjustsFontSizeToFit
-              minimumFontScale={0.78}
-              style={styles.detailPositionBasisValue}
-            >
-              {formatMoneyUsd(invested) ?? "—"}
-            </Text>
-          </View>
-          <View
-            style={[
-              styles.detailPositionBasisGroup,
-              styles.detailPositionBasisGroupRight,
-            ]}
-          >
-            <Text style={styles.detailPositionBasisLabel}>Opened</Text>
-            <Text
-              numberOfLines={1}
-              adjustsFontSizeToFit
-              minimumFontScale={0.78}
-              style={styles.detailPositionBasisValue}
-            >
-              {openedLabel}
-            </Text>
-          </View>
-        </View>
-      </View>
-      {/* One footer row on the grey shell: the holder's next move on the
-          left, sharing what they already have on the right. Share stays
-          centred when there is no thesis slot. */}
-      <View style={[styles.detailPositionFooter, onAddThesis === null && styles.detailPositionFooterCentered]}>
-        {onAddThesis === null ? null : (
-          <AddThesisButton
-            compact
-            tone="muted"
-            onPress={() => (onAddThesis ? onAddThesis(openThesisComposer) : openThesisComposer())}
-          />
-        )}
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Share position"
-          onPress={onShare}
-          style={({ pressed }) => [
-            styles.detailPositionShare,
-            pressed && styles.detailPositionSharePressed,
-          ]}
-        >
-          {/* Stroke thickened to match the label's weight; the outline glyph
-              read as a step lighter than the word beside it. */}
-          <ShareIcon size={18} strokeWidth={2} color={colors.textSecondary} />
-          <Text style={styles.detailPositionShareText}>Share</Text>
-        </Pressable>
-      </View>
-    </View>
-  );
-}
-/**
  * Full-screen thesis detail — the route at `(app)/sandwich-detail`. Reads the
  * active sandwich (plus the like/share/toast wiring) from the shared
  * {@link useSandwichDetail} provider, so the feed, search and saved screens all
@@ -5659,11 +5457,10 @@ export function SandwichDetailScreen() {
     restPnlPct.value = sandwich?.pnlPct ?? Number.NaN;
   }, [restPnlPct, sandwich?.pnlPct]);
 
-  const detailPnlText = useDerivedValue(() => {
-    const value = chartReturnActive.value > 0 ? chartReturnPct.value : restPnlPct.value;
-    if (Number.isNaN(value)) return "--";
-    return `${value >= 0 ? "+" : ""}${value.toFixed(2)}%`;
-  });
+  // The arrow carries the sign (see ScrubReturnText), so this is the raw value.
+  const detailPnlValue = useDerivedValue(() =>
+    chartReturnActive.value > 0 ? chartReturnPct.value : restPnlPct.value,
+  );
 
 
   const rangePills = useMemo(
@@ -6124,9 +5921,10 @@ export function SandwichDetailScreen() {
 
                   {/* Flat legs list */}
                   <ScaledSandwichSection scale={elementScales.assetRows}>
-                    {/* A single-asset sandwich has nothing to split, and its one row
-                        already shows the same return — so no header then. */}
-                    {sortedLegs.length > 1 ? (
+                    {/* The return heads the list for every sandwich. A single
+                        asset has nothing to split, so it is labelled "Asset" —
+                        its row shows the asset's own move, not this return. */}
+                    {sortedLegs.length > 0 ? (
                       <>
                         {/* The basket's return — scrubbed by the chart above — right
                             above the legs it is made of. */}
@@ -6134,12 +5932,18 @@ export function SandwichDetailScreen() {
                           <View style={styles.detailMetaLabel}>
                             {/* Heads the asset list below: how the basket is split. */}
                             <Text
-                              accessibilityLabel={`Split across ${sortedLegs.length} ${sortedLegs.length === 1 ? "asset" : "assets"}`}
+                              accessibilityLabel={sortedLegs.length > 1 ? `Split across ${sortedLegs.length} assets` : "Single asset"}
                               numberOfLines={1}
                               style={styles.detailMetaLabelText}
                             >
-                              Split{" "}
-                              <Text style={styles.detailMetaLabelCount}>{`(${sortedLegs.length})`}</Text>
+                              {sortedLegs.length > 1 ? (
+                                <>
+                                  Split{" "}
+                                  <Text style={styles.detailMetaLabelCount}>{`(${sortedLegs.length})`}</Text>
+                                </>
+                              ) : (
+                                "Asset"
+                              )}
                             </Text>
                           </View>
                           {/* A perp sandwich's percentage is the move in the
@@ -6150,10 +5954,12 @@ export function SandwichDetailScreen() {
                           {sandwich.pnlBasis === "underlying_move" ? (
                             <Text style={styles.detailMetaPnlBasis}>underlying</Text>
                           ) : null}
-                          <AnimatedScrubText
-                            text={detailPnlText}
+                          <ScrubReturnText
+                            value={detailPnlValue}
                             color={detailPnlColor}
-                            style={styles.detailMetaPnl}
+                            textStyle={styles.detailMetaPnl}
+                            width={190}
+                            arrowSize={18}
                           />
                         </View>
                       </>
@@ -7391,28 +7197,13 @@ export function SandwichScreen() {
         </View>
       </View>
 
-      {!loading ? <Pressable
-        accessibilityRole="button"
-        accessibilityLabel="New sandwich"
-        hitSlop={12}
-        onPress={openComposer}
-        style={[
-          styles.composeFab,
-          // A soft glow in the button's own blue, all round rather than
-          // dropped, so it reads as light and not as a shadow.
-          { backgroundColor: colors.actionPrimary, shadowColor: colors.actionPrimary },
-          { bottom: composeFabBottom, right: 16 + Math.max(insets.right, 0) },
-        ]}
-      >
-        <LinearGradient
-          colors={[colors.actionPrimary, colors.actionPrimary]}
-          start={{ x: 0.15, y: 0 }}
-          end={{ x: 0.85, y: 1 }}
-          style={styles.composeFabGradient}
-        >
-          <Ionicons name="add" size={36} color="#FFFFFF" style={{ fontWeight: "900" }} />
-        </LinearGradient>
-      </Pressable> : null}
+      {!loading ? (
+        <ComposeFab
+          onPress={openComposer}
+          bottom={composeFabBottom}
+          right={16 + Math.max(insets.right, 0)}
+        />
+      ) : null}
 
       <SandwichShareSheet ref={shareSheetRef} />
       <StockDetailSheet
@@ -7660,25 +7451,6 @@ const makeStyles = (c: ThemeColors) => {
     gap: 10,
     overflow: "hidden",
   },
-  composeFab: {
-    position: "absolute",
-    zIndex: 40,
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.7,
-    shadowRadius: 18,
-    elevation: 12,
-  },
-  composeFabGradient: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-
   // ── Composer nav (cancel / New sandwich) ──
   composerNav: {
     flexDirection: "row",
@@ -7730,7 +7502,7 @@ const makeStyles = (c: ThemeColors) => {
     justifyContent: "center",
   },
   composerNavCancelText: {
-    color: ink("#D2042D", "#E8213F"),
+    color: ink("#EB1C40", "#EB1C40"),
     fontSize: 16,
     fontWeight: "700",
     fontFamily: F,
@@ -8433,7 +8205,7 @@ const makeStyles = (c: ThemeColors) => {
     color: ink("#16A34A", "#4ade80"),
   },
   stockChangeDown: {
-    color: ink("#D2042D", "#E8213F"),
+    color: ink("#EB1C40", "#EB1C40"),
   },
   comingSoonWrap: {
     paddingTop: 56,
@@ -8574,13 +8346,13 @@ const makeStyles = (c: ThemeColors) => {
     fontFamily: F,
   },
   legConfigRemove: {
-    backgroundColor: wash("#D2042D", "#FFEFF1"),
+    backgroundColor: wash("#EB1C40", "#FFEFF1"),
     paddingHorizontal: 16,
     paddingVertical: 10,
     borderRadius: 20,
   },
   legConfigRemoveText: {
-    color: ink("#D2042D", "#E8213F"),
+    color: ink("#EB1C40", "#EB1C40"),
     fontSize: 14,
     fontWeight: "800",
     fontFamily: F,
@@ -10047,19 +9819,18 @@ const makeStyles = (c: ThemeColors) => {
     color: c.textTertiary,
   },
   detailMetaPnl: {
-    fontSize: 30,
-    fontWeight: "900",
-    fontFamily: F_DISPLAY,
+    fontSize: 26,
+    // Rubik Bold, a step down from Black: the Black cut read heavier than
+    // everything else on the screen.
+    fontWeight: "700",
+    fontFamily: F_DISPLAY_MEDIUM,
     // Tighter tracking on the display % so it reads as one unit; tabular
     // figures so the number's width doesn't jitter as the user scrubs the
     // chart and digits swap (Apple §15).
     letterSpacing: -0.7,
     fontVariant: ["tabular-nums"],
-    // The scrub writes this text from the UI thread, which skips Yoga
-    // measurement — so the box is sized for the widest value it can hold and
-    // the digits stay pinned to the right edge instead of reflowing.
-    width: 190,
-    textAlign: "right",
+    // Box width and right-pinning live in ScrubReturnText: the scrub writes
+    // this text from the UI thread, which skips Yoga measurement.
   },
   // Sits to the left of the big %, baseline-aligned and untinted so it qualifies
   // the number without competing with it.
@@ -10347,12 +10118,12 @@ const makeStyles = (c: ThemeColors) => {
     marginTop: 2,
     padding: 12,
     borderRadius: 14,
-    backgroundColor: wash("#D2042D", "#FFEFF1"),
+    backgroundColor: wash("#EB1C40", "#FFEFF1"),
     borderWidth: 1,
-    borderColor: ink("#FFD2D9", withAlpha("#E8213F", 0.4)),
+    borderColor: ink("#FFD2D9", withAlpha("#EB1C40", 0.4)),
   },
   thesisComposerErrorText: {
-    color: ink("#D2042D", "#FF5A70"),
+    color: ink("#EB1C40", "#FF5A70"),
     fontSize: 14,
     lineHeight: 20,
     fontWeight: "700",
@@ -10891,7 +10662,7 @@ const makeStyles = (c: ThemeColors) => {
     backgroundColor: wash("#22C55E", "#E6F9EC"),
   },
   previewLegSideChipShort: {
-    backgroundColor: wash("#D2042D", "#FFEFF1"),
+    backgroundColor: wash("#EB1C40", "#FFEFF1"),
   },
   previewLegSideLabel: {
     fontSize: 10,
@@ -10903,7 +10674,7 @@ const makeStyles = (c: ThemeColors) => {
     color: ink("#059669", "#4ade80"),
   },
   previewLegSideLabelShort: {
-    color: ink("#D2042D", "#E8213F"),
+    color: ink("#EB1C40", "#EB1C40"),
   },
   previewLegSubtitle: {
     marginTop: 4,
@@ -10935,7 +10706,7 @@ const makeStyles = (c: ThemeColors) => {
     fontWeight: "900",
   },
   composerLegsTotalWarn: {
-    color: ink("#D2042D", "#FF5A70"),
+    color: ink("#EB1C40", "#FF5A70"),
   },
   composerLegEmpty: {
     backgroundColor: c.background,
@@ -11025,7 +10796,7 @@ const makeStyles = (c: ThemeColors) => {
     backgroundColor: "#1f9d6b",
   },
   composerSideShort: {
-    backgroundColor: "#D2042D",
+    backgroundColor: "#EB1C40",
   },
   composerSideYes: {
     backgroundColor: "#1d6cd6",
@@ -11388,7 +11159,7 @@ const makeStyles = (c: ThemeColors) => {
     borderColor: c.text,
   },
   pickerWeightInputWrapWarn: {
-    borderColor: ink("#FFD2D9", withAlpha("#E8213F", 0.4)),
+    borderColor: ink("#FFD2D9", withAlpha("#EB1C40", 0.4)),
   },
   pickerWeightInputBig: {
     color: c.text,
@@ -11409,7 +11180,7 @@ const makeStyles = (c: ThemeColors) => {
   },
   pickerWeightWarn: {
     marginTop: 8,
-    color: ink("#D2042D", "#FF5A70"),
+    color: ink("#EB1C40", "#FF5A70"),
     fontSize: 12,
     fontWeight: "700",
     fontFamily: F,
@@ -11661,127 +11432,6 @@ const makeStyles = (c: ThemeColors) => {
   detailLegsSection: {
     marginTop: 6,
     gap: 2,
-  },
-  detailPositionFooter: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: 16,
-  },
-  detailPositionFooterCentered: { justifyContent: "center" },
-  detailPositionCard: {
-    marginHorizontal: 12,
-    marginTop: 6,
-    marginBottom: 5,
-    borderRadius: 16,
-    backgroundColor: c.surfaceAlt,
-    overflow: "hidden",
-  },
-  detailPositionSummary: {
-    margin: 4,
-    marginBottom: 0,
-    borderRadius: 13,
-    paddingHorizontal: 12,
-    paddingTop: 10,
-    paddingBottom: 9,
-    backgroundColor: c.surface,
-    borderWidth: 1,
-    borderColor: c.border,
-  },
-  detailPositionHeadline: {
-    minHeight: 36,
-    flexDirection: "row",
-    alignItems: "flex-start",
-    justifyContent: "space-between",
-    gap: 8,
-  },
-  detailPositionValueGroup: {
-    flex: 1,
-    minWidth: 0,
-  },
-  detailPositionValue: {
-    color: c.text,
-    fontSize: 19,
-    lineHeight: 24,
-    fontWeight: "900",
-    fontFamily: F,
-    fontVariant: ["tabular-nums"],
-  },
-  detailPositionPnlGroup: {
-    flex: 1,
-    minWidth: 0,
-    alignItems: "flex-end",
-  },
-  detailPositionPnl: {
-    // Green up, pink down — the app's own two, same as the return row under it.
-    // Overridden per-sign at the call site; this is only the down fallback.
-    color: c.negative,
-    fontSize: 19,
-    lineHeight: 24,
-    fontFamily: F_DISPLAY_ONE,
-    fontVariant: ["tabular-nums"],
-    textAlign: "right",
-  },
-  detailPositionReturnRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-  },
-  detailPositionReturn: {
-    fontSize: 12,
-    lineHeight: 16,
-    fontWeight: "800",
-    fontFamily: F_DISPLAY_MEDIUM,
-    fontVariant: ["tabular-nums"],
-  },
-  detailPositionBasisRow: {
-    marginTop: 12,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 10,
-  },
-  detailPositionBasisGroup: {
-    flex: 1,
-    minWidth: 0,
-    flexDirection: "row",
-    alignItems: "baseline",
-    gap: 6,
-  },
-  detailPositionBasisGroupRight: {
-    justifyContent: "flex-end",
-  },
-  // Everything on the card but the headline value steps down a weight: the
-  // amount is the one figure the card exists to show.
-  detailPositionBasisLabel: {
-    color: c.textTertiary,
-    fontSize: 13,
-    fontWeight: "600",
-    fontFamily: F,
-  },
-  detailPositionBasisValue: {
-    color: c.textSecondary,
-    fontSize: 13,
-    fontWeight: "600",
-    fontFamily: F,
-    fontVariant: ["tabular-nums"],
-  },
-  detailPositionShare: {
-    minHeight: 40,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 6,
-  },
-  detailPositionSharePressed: {
-    opacity: 0.55,
-  },
-  detailPositionShareText: {
-    color: c.textSecondary,
-    fontSize: 14,
-    lineHeight: 18,
-    fontWeight: "600",
-    fontFamily: F,
   },
   buyButtonWrap: {
     borderRadius: CTA.radius,

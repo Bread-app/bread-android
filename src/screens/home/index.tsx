@@ -28,6 +28,7 @@ import Animated, {
 } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { ComposeFab } from "@/components/compose-fab";
 import { CrtTexture } from "@/components/home/crt-texture";
 import { SandwichCategories } from "@/components/home/sandwich-categories";
 import { TICKER_HEIGHT, TickerTape } from "@/components/home/ticker-tape";
@@ -35,6 +36,7 @@ import { BottomTabInset, Fonts, type ThemeColors } from "@/constants/theme";
 import { useThemedStyles } from "@/hooks/use-themed-styles";
 import { appUserPayloadFromPrivyUser } from "@/lib/api";
 import { withAlpha } from "@/lib/color-utils";
+import { useSandwichComposer } from "@/lib/sandwich-composer-store";
 import { useStockDetail } from "@/lib/stock-detail-store";
 import { useThemeStore } from "@/lib/theme-store";
 
@@ -61,6 +63,12 @@ export function HomeScreen() {
   const { user } = usePrivy();
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const composer = useSandwichComposer();
+  // Same spot as the Sandwich feed's: just above the native tab bar.
+  const openComposer = useCallback(() => {
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    composer.open();
+  }, [composer]);
   const { width } = useWindowDimensions();
   const viewerPayload = useMemo(() => appUserPayloadFromPrivyUser(user), [user]);
   const viewerPrivyUserId = viewerPayload?.privyUserId ?? null;
@@ -328,6 +336,11 @@ export function HomeScreen() {
         />
       </Animated.View>
 
+      <ComposeFab
+        onPress={openComposer}
+        bottom={88 + Math.max(insets.bottom, 10)}
+        right={16 + Math.max(insets.right, 0)}
+      />
     </View>
   );
 }

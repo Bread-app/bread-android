@@ -11,28 +11,35 @@ import { useThemeStore } from '@/lib/theme-store';
  * (`headerSearchBarOptions`), giving the genuine "search tab" behaviour where the
  * field expands from the bar on tap. The title uses the compact header's leading
  * slot so it sits closer to the safe-area edge instead of low in a large-title
- * navigation bar. See `./index.tsx`.
+ * navigation bar, with no glass capsule behind it. See `./index.tsx`.
  */
 export default function SearchStackLayout() {
   const { colors } = useThemeStore();
+  const title = (
+    <Text
+      accessibilityRole="header"
+      style={{
+        color: colors.text,
+        fontSize: 30,
+        fontFamily: Fonts.rounded,
+        fontWeight: '700',
+      }}>
+      Search
+    </Text>
+  );
   return (
     <Stack
       screenOptions={{
         headerShown: true,
         headerLargeTitle: false,
         headerTitle: '',
-        headerLeft: () => (
-          <Text
-            accessibilityRole="header"
-            style={{
-              color: colors.text,
-              fontSize: 30,
-              fontFamily: Fonts.rounded,
-              fontWeight: '700',
-            }}>
-            Search
-          </Text>
-        ),
+        // iOS 26 seats every left bar item on a Liquid Glass capsule; the title
+        // is a title, not a button, so it opts out of that shared background.
+        unstable_headerLeftItems: () => [
+          { type: 'custom', element: title, hidesSharedBackground: true },
+        ],
+        // Android (and older iOS) have no bar items — same title, plain view.
+        headerLeft: () => title,
         headerShadowVisible: false,
         headerTintColor: colors.text,
         headerStyle: { backgroundColor: colors.background },

@@ -450,12 +450,12 @@ export function SandwichBasketChart({
         return;
       }
 
-      const timeframe = getTimeframeForCreatedAt(
+      let timeframe = getTimeframeForCreatedAt(
         fromSeconds,
         endedAtSeconds ?? now(),
       );
 
-      const results = await Promise.allSettled(
+      const loadLegs = (spotTimeframe: BirdeyeOhlcvTimeframe) => Promise.allSettled(
         [
           ...chartLegs.map(async (leg): Promise<LoadedLeg> => {
             if (leg.type === 'perp' && leg.symbol) {
@@ -479,7 +479,7 @@ export function SandwichBasketChart({
                   })),
               };
             }
-            const result = await getBirdeyeOhlcv(leg.mint!, timeframe, fromSeconds, {
+            const result = await getBirdeyeOhlcv(leg.mint!, spotTimeframe, fromSeconds, {
               ...(endedAtSeconds !== null ? { timeTo: endedAtSeconds } : {}),
             });
             return { leg, items: clipCandlesAt(result.items, endedAtSeconds) };
@@ -504,7 +504,22 @@ export function SandwichBasketChart({
         ],
       );
 
+      let results = await loadLegs(timeframe);
       if (id !== requestIdRef.current) return;
+
+      // tokens.xyz serves no 1m/5m candles for most equities, so a position
+      // only hours old came back with nothing at all. Every spot leg empty at
+      // an intraday interval → ask again at 1H, which it does serve.
+      const spotLegsEmpty = (settled: typeof results) =>
+        chartLegs.length > 0 &&
+        settled
+          .slice(0, chartLegs.length)
+          .every((r) => r.status !== 'fulfilled' || r.value.items.length === 0);
+      if ((timeframe === '1m' || timeframe === '5m') && spotLegsEmpty(results)) {
+        timeframe = '1H';
+        results = await loadLegs(timeframe);
+        if (id !== requestIdRef.current) return;
+      }
 
       const loaded = results
         .filter((result): result is PromiseFulfilledResult<LoadedLeg> => result.status === 'fulfilled')
@@ -514,7 +529,11 @@ export function SandwichBasketChart({
         const idKey = leg.id ?? leg.legId ?? leg.mint ?? leg.marketId;
         if (!loadedIds.has(idKey)) loaded.push({ leg, items: [] });
       }
-      const hasUnrecoverableLeg = loaded.some(
+      // A basket missing SOME legs can't be blended honestly. One where EVERY
+      // leg is empty has nothing to blend at all — that falls through to the
+      // no-candles path below, which draws the known return instead.
+      const anyLegHasCandles = loaded.some(({ items }) => items.length > 0);
+      const hasUnrecoverableLeg = anyLegHasCandles && loaded.some(
         ({ leg, items }) =>
           items.length === 0 &&
           !(typeof leg.pnlPct === 'number' && Number.isFinite(leg.pnlPct)),

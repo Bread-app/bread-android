@@ -443,17 +443,23 @@ export async function recordSandwichPositionSell(
   );
 }
 
-export async function removeStoredSandwichPosition(walletAddress: string, positionId: string): Promise<void> {
+export async function removeStoredSandwichPosition(
+  walletAddress: string,
+  positionId: string,
+  { tombstone = true }: { tombstone?: boolean } = {},
+): Promise<void> {
   const current = await readPositions(walletAddress);
   const removed = current.find((position) => position.id === positionId);
   await writePositions(
     walletAddress,
     current.filter((position) => position.id !== positionId),
   );
-  // Both callers remove a position the wallet no longer holds — an exit whose
-  // legs are gone, or the prune against live balances. Either way the backend
-  // must not put it back on the next merge.
-  if (removed) await markSold(walletAddress, removed.sandwichId);
+  // An exit made here must not be put back by the next merge before the
+  // backend has indexed it. The balance prune passes tombstone:false: it is a
+  // guess from a balance read, and a server-side buy (DM, Like→Buy) reaches
+  // the positions list BEFORE its tokens reach the balance read — so the prune
+  // "sold" a brand-new Sandwich and the marker hid it for a week.
+  if (removed && tombstone) await markSold(walletAddress, removed.sandwichId);
 }
 
 /**
@@ -466,6 +472,12 @@ export async function removeStoredSandwichPosition(walletAddress: string, positi
 export async function seedFromBackend(
   walletAddress: string,
   backendPositions: PublicSandwichPosition[],
+  /**
+   * Whether the wallet visibly still holds this position. A "sold" marker is
+   * only a bridge until the backend catches up on an exit; when the tokens
+   * are plainly still there, the marker is wrong (or stale) and is dropped.
+   */
+  isBackedByWallet?: (position: PublicSandwichPosition) => boolean,
 ): Promise<SandwichPosition[]> {
   const local = await readPositions(walletAddress);
   const localBySandwichId = new Map(local.map((p) => [p.sandwichId, p]));
@@ -479,7 +491,7 @@ export async function seedFromBackend(
 
   for (const pos of backendPositions) {
     const soldAt = sold[pos.sandwichId];
-    if (soldAt !== undefined) {
+    if (soldAt !== undefined && !isBackedByWallet?.(pos)) {
       if (pos.updatedAt <= soldAt) {
         // Exited here, and this is the pre-exit row coming back. Skip it and
         // keep the marker until the backend catches up.

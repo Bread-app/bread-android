@@ -22,6 +22,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 import { SolanaMobileProvider } from '@/components/solana-mobile-provider';
 import { setAuthTokenProvider } from '@/lib/api';
+import { hideLaunchSplash, LAUNCH_SPLASH_MAX_MS } from '@/lib/launch-splash';
 import { privyConfig } from '@/lib/privy';
 import { ThemeProvider, useThemeStore } from '@/lib/theme-store';
 
@@ -43,6 +44,12 @@ function ApiAuthBridge() {
 
 export default function RootLayout() {
   const hasSecureRandom = typeof globalThis.crypto?.getRandomValues === 'function';
+
+  // Never let the launch splash outlive a slow/hung startup.
+  useEffect(() => {
+    const timer = setTimeout(hideLaunchSplash, LAUNCH_SPLASH_MAX_MS);
+    return () => clearTimeout(timer);
+  }, []);
   // Bundle the heavy Rubik display face + the rounded Baloo 2 bubble face used
   // by the detail-screen tabs. Keep rendering while they load (system font shows
   // first); never block the app on a font, so a slow/failed load can't trap the
@@ -63,6 +70,10 @@ export default function RootLayout() {
     PTSerif_400Regular,
     PTSerif_700Bold,
   });
+
+  if (!hasSecureRandom || !privyConfig.appId || !privyConfig.clientId) {
+    hideLaunchSplash();
+  }
 
   if (!hasSecureRandom) {
     return (
@@ -139,6 +150,11 @@ function NavigationHaptics() {
   const previous = useRef<string | null>(null);
   const lastTickAt = useRef(0);
   useEffect(() => {
+    // `/` is the index route deciding where to go (Privy + user sync). Once
+    // the path moves on — the redirect landed, or a deep link opened straight
+    // into a screen — the first real screen is up, so drop the launch splash.
+    if (pathname !== '/') hideLaunchSplash();
+
     const from = previous.current;
     previous.current = pathname;
     if (from === null || from === pathname) return;

@@ -75,13 +75,13 @@ const DEFAULT_THEME: Required<ChartTheme> = {
   gridColor: '#EEF1F5',
   borderColor: '#E3E6EB',
   upColor: '#089981',
-  downColor: '#F23645',
+  downColor: '#EB1C40',
   crosshairColor: '#9598A1',
   // Deliberately light: it has to read as a different thing from the coloured
   // live-price pill sitting on the same scale.
   crosshairLabelColor: '#E9EDF5',
   livePriceUpColor: '#02ED45',
-  livePriceDownColor: '#D2042D',
+  livePriceDownColor: '#EB1C40',
 };
 
 /**

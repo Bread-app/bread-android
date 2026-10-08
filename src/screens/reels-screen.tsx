@@ -107,7 +107,7 @@ const MAX_PAGES_PER_TOPUP = 5;
 
 const INK = "#0b0b0f";
 const UP = "#35F046";
-const DOWN = "#D2042D";
+const DOWN = "#EB1C40";
 const CYAN = "#38BDF8";
 
 type Reel = {

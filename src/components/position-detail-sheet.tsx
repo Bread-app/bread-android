@@ -7,12 +7,14 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { AssetLogo } from '@/components/asset-logo';
 import { HeldPositionActions } from '@/components/held-position-actions';
 import { SandwichBasketChart } from '@/components/sandwich-basket-chart';
+import { SandwichPositionCard } from '@/components/sandwich-position-card';
 import { VerifiedBadge } from '@/components/verified-badge';
 import { isXPostSource, SourcePostCard } from '@/components/x-post-preview';
 import { YouTubeClipPlayer } from '@/components/youtube-clip-player';
 import { Fonts, type ThemeColors } from '@/constants/theme';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
 import type { PositionDetail, Sandwich, SandwichProvenance } from '@/lib/api';
+import type { SandwichPosition } from '@/lib/sandwich-positions';
 import { useThemeStore } from '@/lib/theme-store';
 import { PressableScale } from '@/components/pressable-scale';
 
@@ -50,6 +52,11 @@ type PositionDetailSheetProps = {
   onBuyMore?: (data: FocusedPositionData) => void;
   onClosePosition?: (data: FocusedPositionData) => void;
   onViewFull: (data: FocusedPositionData) => void;
+  /**
+   * The viewer's own Sandwich only: "Add thesis" on the position card. Called
+   * once the sheet is down, so the composer lands on a screen, not under it.
+   */
+  onAddThesis?: (open: () => void) => void;
 };
 
 export const PositionDetailSheet = forwardRef<PositionDetailSheetRef, PositionDetailSheetProps>(
@@ -60,6 +67,7 @@ function PositionDetailSheet({
   onBuyMore,
   onClosePosition,
   onViewFull,
+  onAddThesis,
 }, ref) {
   const styles = useThemedStyles(makeStyles);
   const { colors } = useThemeStore();
@@ -240,9 +248,12 @@ function PositionDetailSheet({
                 </View>
                 {postedAt ? <Text style={styles.bylineMeta}>{shortDate(postedAt)}</Text> : null}
               </View>
-              <Pressable hitSlop={8} onPress={() => onShare(shown)} style={styles.iconButton}>
-                <Ionicons name="share-outline" size={18} color={colors.textSecondary} />
-              </Pressable>
+              {/* An open position shares from its card's own Share. */}
+              {closed ? (
+                <Pressable hitSlop={8} onPress={() => onShare(shown)} style={styles.iconButton}>
+                  <Ionicons name="share-outline" size={18} color={colors.textSecondary} />
+                </Pressable>
+              ) : null}
               <Pressable hitSlop={8} onPress={() => sheetRef.current?.dismiss()} style={styles.iconButton}>
                 <Ionicons name="close" size={20} color={colors.textSecondary} />
               </Pressable>
@@ -285,20 +296,47 @@ function PositionDetailSheet({
               )}
             </View>
 
-            <View style={styles.result}>
-              <View style={styles.resultTop}>
-                <Text style={[styles.pnl, { color: accent }]} numberOfLines={1}>
-                  {pnlUsd == null ? '—' : `${pnlUsd >= 0 ? '+' : '−'}${money(Math.abs(pnlUsd))}`}
-                </Text>
-                <Text style={[styles.returnPct, { color: accent }]}>
-                  {pnlPct == null ? '—' : `${pnlPct > 0 ? '▲ ' : pnlPct < 0 ? '▼ ' : ''}${Math.abs(pnlPct).toFixed(2)}%`}
-                </Text>
+            {closed ? (
+              <View style={styles.result}>
+                <View style={styles.resultTop}>
+                  <Text style={[styles.pnl, { color: accent }]} numberOfLines={1}>
+                    {pnlUsd == null ? '—' : `${pnlUsd >= 0 ? '+' : '−'}${money(Math.abs(pnlUsd))}`}
+                  </Text>
+                  <Text style={[styles.returnPct, { color: accent }]}>
+                    {pnlPct == null ? '—' : `${pnlPct > 0 ? '▲ ' : pnlPct < 0 ? '▼ ' : ''}${Math.abs(pnlPct).toFixed(2)}%`}
+                  </Text>
+                </View>
+                <View style={styles.metricRow}>
+                  <Metric label={entryLabel} value={entryValue} styles={styles} />
+                  <Metric label={exitLabel} value={exitValue} align="right" styles={styles} />
+                </View>
               </View>
-              <View style={styles.metricRow}>
-                <Metric label={entryLabel} value={entryValue} styles={styles} />
-                <Metric label={exitLabel} value={exitValue} align="right" styles={styles} />
+            ) : (
+              // An open position is the same card the Sandwich screen shows:
+              // value and PnL, invested and opened, Add thesis and Share. The
+              // figures are always passed in — this sheet is portalled above
+              // the wallet provider, so the card can't value it itself.
+              <View style={styles.positionCard}>
+                <SandwichPositionCard
+                  position={positionFromDetail(detail)}
+                  valuationOverride={{
+                    costUsd: detail.costUsd,
+                    valueUsd: shown.currentValueUsd ?? null,
+                    pnlUsd: pnlUsd ?? null,
+                    returnPct: pnlPct,
+                  }}
+                  onShare={() => onShare(shown)}
+                  onAddThesis={
+                    onAddThesis && detail.sandwichId
+                      ? (open) => {
+                          sheetRef.current?.dismiss();
+                          onAddThesis(open);
+                        }
+                      : null
+                  }
+                />
               </View>
-            </View>
+            )}
 
             {detail.chart.legs.length > 0 ? (
               <View style={styles.legChips}>
@@ -385,6 +423,22 @@ function currentUnitPrice(
   return quantity > 0 ? currentValueUsd / quantity : null;
 }
 
+/** The card's position shape, from what the sheet holds. */
+function positionFromDetail(detail: PositionDetail): SandwichPosition {
+  return {
+    id: detail.id,
+    sandwichId: detail.sandwichId ?? detail.id,
+    name: detail.title,
+    summary: detail.sandwich?.summary ?? detail.title,
+    investedUsd: detail.costUsd,
+    createdAt: detail.openedAt ?? '',
+    updatedAt: detail.openedAt ?? '',
+    pendingSync: false,
+    strictAtomic: false,
+    legs: [],
+  };
+}
+
 function shortDate(iso: string): string {
   const date = new Date(iso);
   return Number.isNaN(date.getTime()) ? '' : date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
@@ -406,6 +460,9 @@ const makeStyles = (c: ThemeColors) => StyleSheet.create({
   thesis: { color: c.text, fontFamily: F, fontSize: 16, lineHeight: 23, fontWeight: '600' },
   chartBlock: {},
   result: { gap: 12 },
+  // The card carries its own 12pt side margin for the detail screen; cancel
+  // it so the card lines up with the rest of this sheet's content.
+  positionCard: { marginHorizontal: -12 },
   resultTop: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: 12 },
   pnl: { fontFamily: Fonts.displayMedium, fontSize: 28, fontWeight: '900', flexShrink: 1 },
   returnPct: { fontFamily: F, fontSize: 16, fontWeight: '800', fontVariant: ['tabular-nums'] },

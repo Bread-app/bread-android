@@ -163,8 +163,8 @@ const makeStyles = (c: ThemeColors) =>
     },
     change: {
       fontSize: 13,
-      fontWeight: '800',
-      fontFamily: Fonts.displayMedium,
+      fontWeight: '700',
+      fontFamily: F,
       fontVariant: ['tabular-nums'],
     },
   });

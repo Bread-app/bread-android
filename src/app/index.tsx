@@ -1,7 +1,7 @@
 import { usePrivy } from '@privy-io/expo';
 import { Redirect } from 'expo-router';
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Image, StyleSheet, View } from 'react-native';
 
 import { appUserPayloadFromPrivyUser } from '@/lib/api';
 import { syncUser } from '@/lib/user-sync';
@@ -66,8 +66,11 @@ export default function IndexRoute() {
   // store forces isLoaded=false and this spins forever after logout).
   if (!isReady || (user && (!isLoaded || !serverSynced))) {
     return (
+      // Mirrors the native launch splash (app.json) so a slow start that
+      // outlives it looks continuous, just with a spinner added.
       <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#000000" />
+        <Image source={require('../../assets/images/splash-icon.png')} style={styles.loadingIcon} />
+        <ActivityIndicator style={styles.loadingSpinner} size="small" color="#000000" />
       </View>
     );
   }
@@ -88,6 +91,15 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#ffffff',
+    backgroundColor: '#0AFE0B',
+  },
+  loadingIcon: {
+    width: 220,
+    height: 220,
+    resizeMode: 'contain',
+  },
+  loadingSpinner: {
+    position: 'absolute',
+    bottom: 96,
   },
 });

@@ -60,7 +60,7 @@ import {
   type HoldingsCategoryKey,
 } from '@/components/holdings-category-switch';
 import { LoadErrorState } from '@/components/load-error-state';
-import { PublicSandwichHoldingCard } from '@/components/sandwich-holding-card';
+import { PublicSandwichHoldingCard, positionDetailProvenance } from '@/components/sandwich-holding-card';
 import { useThemeStore } from '@/lib/theme-store';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
 import { cardSocial, toggledCardSocial, withCardSocial } from '@/lib/card-social';
@@ -99,13 +99,15 @@ import {
 } from '@/components/position-share-sheet';
 import {
   publicClosedPositionDetail,
-  viewedPositionFromHolding,
+  publicOpenPerpDetail,
+  publicOpenSandwichDetail,
+  publicOpenTokenDetail,
 } from '@/lib/public-position-detail';
 
 const F = Fonts.rounded;
 
 const COLOR_UP = '#02ED45';
-const COLOR_DOWN = '#D2042D';
+const COLOR_DOWN = '#EB1C40';
 const RANGES: PortfolioRange[] = ['24H', '7d', '30d'];
 
 type Tab = 'holdings' | 'sandwiches';
@@ -232,7 +234,7 @@ function Stat({ count, label }: { count: number; label: string }) {
   );
 }
 
-function StockHoldingRow({ holding, onPress }: { holding: EnrichedHolding; onPress: (stock: Stock) => void }) {
+function StockHoldingRow({ holding, onPress }: { holding: EnrichedHolding; onPress: (holding: EnrichedHolding) => void }) {
   const styles = useThemedStyles(makeStyles);
   const { colors } = useThemeStore();
   const { stock, valueUsd, pnlPct } = holding;
@@ -245,8 +247,7 @@ function StockHoldingRow({ holding, onPress }: { holding: EnrichedHolding; onPre
       accessibilityRole="button"
       accessibilityLabel={`Open ${stock.name} details`}
       onPress={() => {
-        void Haptics.selectionAsync();
-        onPress(stock);
+        onPress(holding);
       }}
       style={styles.holdingRow}>
       <AssetLogo
@@ -769,9 +770,6 @@ function UserProfileView({
     if (visible) loadHistory();
   }, [visible, loadHistory]);
 
-  const openStockDetail = useCallback((stock: Stock) => {
-    stockDetailSheetRef.current?.open(stock);
-  }, []);
 
   /**
    * Open the thesis behind one of this user's Sandwich positions.
@@ -866,33 +864,42 @@ function UserProfileView({
   );
 
   /**
-   * A held position opens the Sandwich screen with that holding on it — the
-   * same screen the viewer's own profile opens, showing THIS user's value and
-   * return, read-only. The Sandwich is normally already cached from the list
-   * load, so the push happens on the tap.
+   * Every open holding opens the same position sheet the owner sees on their
+   * own profile — THIS user's entry, value and return, read-only. It goes up
+   * on the tap from the row's own figures; a Sandwich's chart legs follow.
    */
+  const presentPosition = useCallback((initial: FocusedPositionData) => {
+    void Haptics.selectionAsync();
+    positionDetailSheetRef.current?.present(initial);
+    startTransition(() => setFocusedPosition(initial));
+  }, []);
+
   const openSandwichPosition = useCallback(
     (position: PublicSandwichHolding) => {
-      void Haptics.selectionAsync();
-      const open = (sandwich: Sandwich) =>
-        pushBehindModal(() =>
-          sandwichDetail.open(sandwich, {
-            onUpdated: applyUpdatedSandwich,
-            viewedPosition: viewedPositionFromHolding(position),
-          }),
-        );
-      const cached = holdingSandwichesRef.current.get(position.sandwichId);
-      if (cached) {
-        open(cached);
-        return;
-      }
-      void getSandwichById(position.sandwichId, anonymousId).then((sandwich) => {
-        if (!sandwich) return;
-        holdingSandwichesRef.current.set(position.sandwichId, sandwich);
-        open(sandwich);
+      const cached = holdingSandwichesRef.current.get(position.sandwichId) ?? null;
+      const { detail, metrics } = publicOpenSandwichDetail(position, cached);
+      presentPosition({
+        detail,
+        sandwich: cached,
+        provenance: positionDetailProvenance(detail),
+        ...metrics,
       });
+      if (!cached) {
+        hydrateFocusedSandwich(position.id, position.sandwichId, (sandwich) => {
+          holdingSandwichesRef.current.set(position.sandwichId, sandwich);
+          return publicOpenSandwichDetail(position, sandwich).detail;
+        });
+      }
     },
-    [anonymousId, applyUpdatedSandwich, pushBehindModal, sandwichDetail],
+    [hydrateFocusedSandwich, presentPosition],
+  );
+
+  const openTokenPosition = useCallback(
+    (holding: EnrichedHolding) => {
+      const { detail, metrics } = publicOpenTokenDetail(holding);
+      presentPosition({ detail, ...metrics });
+    },
+    [presentPosition],
   );
 
   /** A perp row opens its market in this screen's own asset sheet. */
@@ -906,9 +913,11 @@ function UserProfileView({
   );
 
   const openPerpPosition = useCallback(
-    (position: PublicPerpPosition) =>
-      openPerpMarket(position.symbol, position.positionSize < 0 ? 'short' : 'long'),
-    [openPerpMarket],
+    (position: PublicPerpPosition) => {
+      const { detail, metrics } = publicOpenPerpDetail(position);
+      presentPosition({ detail, ...metrics });
+    },
+    [presentPosition],
   );
 
   /**
@@ -1434,7 +1443,7 @@ function UserProfileView({
             </View>
           );
         }
-        return <StockHoldingRow holding={row.holding} onPress={openStockDetail} />;
+        return <StockHoldingRow holding={row.holding} onPress={openTokenPosition} />;
       }
       const feedItem = item as FeedItem;
       return (
@@ -1463,7 +1472,7 @@ function UserProfileView({
     [
       holdingsActive,
       ProfileTabs,
-      openStockDetail,
+      openTokenPosition,
       openSandwichPosition,
       openPerpPosition,
       openClosedPosition,

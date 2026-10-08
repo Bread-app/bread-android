@@ -53,7 +53,7 @@ import type { SandwichPosition } from '@/lib/sandwich-positions';
 import { CTA, ctaBottomInset } from '@/lib/screen-corners';
 import { useThemeStore } from '@/lib/theme-store';
 import { useToast } from '@/lib/toast-store';
-import { SandwichPositionCard } from '@/screens/sandwich-screen';
+import { SandwichPositionCard } from '@/components/sandwich-position-card';
 import { PressableScale } from '@/components/pressable-scale';
 
 const F = Fonts.rounded;

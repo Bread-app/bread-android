@@ -44,7 +44,7 @@ function changeColor(value: number | null): string {
     return '#000000';
   }
 
-  return value > 0 ? '#02ED45' : '#D2042D';
+  return value > 0 ? '#02ED45' : '#EB1C40';
 }
 
 function cleanStockSymbol(symbol: string): string {
@@ -235,7 +235,7 @@ const makeStyles = (c: ThemeColors) => StyleSheet.create({
   changeText: {
     fontSize: 14,
     fontWeight: '700',
-    fontFamily: Fonts.displayMedium,
+    fontFamily: F,
     fontVariant: ['tabular-nums'],
   },
 });

@@ -39,10 +39,8 @@ import {
   type SandwichCommentsSheetRef,
 } from '@/components/sandwich-comments-sheet';
 import { buildFeedItems, getSourceVideo } from '@/lib/sandwich-feed';
-import {
-  SandwichPositionCard,
-  SandwichSellPad,
-} from '@/screens/sandwich-screen';
+import { SandwichPositionCard } from '@/components/sandwich-position-card';
+import { SandwichSellPad } from '@/screens/sandwich-screen';
 import { CTA, ctaBottomInset } from '@/lib/screen-corners';
 import { Fonts, type ThemeColors } from '@/constants/theme';
 import { PositionTakesSection } from '@/components/position-takes-section';
