@@ -5,16 +5,24 @@ import { useEffect, useRef } from "react";
 
 import { markNotificationsRead } from "@/lib/api";
 import { useComposerProgress } from "@/lib/composer-progress-store";
-import { registerPushTokenIfPermitted } from "@/lib/notification-permissions";
+import { registerForPushNotificationsIfNeeded } from "@/lib/notification-permissions";
+import { useOnboardingStatus } from "@/lib/onboarding-store";
+
+// Lets the home screen settle after the onboarding → home transition so the
+// system dialog doesn't land mid-animation.
+const PERMISSION_PROMPT_DELAY_MS = 800;
 
 /**
  * Registers the signed-in device for push and routes taps to the right screen.
  *
  * Registration is attempted for every signed-in user, not just Like-to-Buy
- * users: notifications now cover follows, comments, fills and deposits. It is a
- * no-op unless the OS has already granted permission — the system prompt is
- * asked from moments that earn it (opening the inbox, the notification settings
- * screen, enabling Like-to-Buy), never on launch.
+ * users: notifications now cover follows, comments, fills and deposits.
+ *
+ * The system prompt is asked once the user is signed in AND onboarded — i.e.
+ * right after finishing onboarding, or on the first sign-in after a reinstall
+ * (deleting the app resets the OS permission to undetermined). It only ever
+ * prompts while the status is undetermined, so a previous "Don't Allow" is
+ * respected; an already-granted device just re-registers its token.
  */
 export function usePushNotifications(): void {
   const { user } = usePrivy();
@@ -25,11 +33,15 @@ export function usePushNotifications(): void {
   // remount) would re-navigate to a notification the user already dealt with.
   // Keyed by request identifier, per process.
   const handledResponses = useRef<Set<string>>(new Set());
+  const { isLoaded: onboardingLoaded, isComplete: onboarded } = useOnboardingStatus(user?.id ?? null);
 
   useEffect(() => {
-    if (!user?.id) return;
-    void registerPushTokenIfPermitted();
-  }, [user?.id]);
+    if (!user?.id || !onboardingLoaded || !onboarded) return;
+    const timer = setTimeout(() => {
+      void registerForPushNotificationsIfNeeded();
+    }, PERMISSION_PROMPT_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [user?.id, onboardingLoaded, onboarded]);
 
   useEffect(() => {
     if (!user?.id) return;

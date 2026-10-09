@@ -95,26 +95,6 @@ function expoProjectId(): string | null {
   );
 }
 
-/**
- * Registers this device *only if the OS has already granted permission* — it
- * never shows the system prompt.
- *
- * This is what runs on every launch. The prompt itself is asked from moments
- * that earn it (opening the notification inbox, enabling Like-to-Buy, the
- * notification settings screen), because a permission dialog on first launch is
- * the reliable way to get a permanent "no".
- */
-export async function registerPushTokenIfPermitted(): Promise<boolean> {
-  if (!Device.isDevice) return false;
-  try {
-    const current = await Notifications.getPermissionsAsync();
-    if (current.status !== "granted") return false;
-  } catch {
-    return false;
-  }
-  return registerForPushNotificationsIfNeeded();
-}
-
 export async function registerForPushNotificationsIfNeeded(): Promise<boolean> {
   if (!Device.isDevice) return false;
   const granted = await requestNotificationPermissionIfNeeded();
