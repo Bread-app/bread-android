@@ -27,6 +27,7 @@ import {
   Keyboard,
   KeyboardAvoidingView,
   Linking,
+  Modal,
   Platform,
   Pressable,
   RefreshControl,
@@ -48,13 +49,12 @@ import Animated, {
   useSharedValue,
   withSpring,
   withTiming,
-  useAnimatedProps,
   useDerivedValue,
   type SharedValue,
 } from "react-native-reanimated";
-import Svg, { Path } from "react-native-svg";
-import { Gesture, GestureDetector } from "react-native-gesture-handler";
-import { Host, Slider } from "@expo/ui/swift-ui";
+import Svg, { Path, Rect } from "react-native-svg";
+import { Gesture, GestureDetector, GestureHandlerRootView } from "react-native-gesture-handler";
+import { ScaleRuler } from "@/components/scale-ruler";
 import { LegTapHint } from "@/components/leg-tap-hint";
 import { LoadErrorState } from "@/components/load-error-state";
 import { ShareIcon } from "@/components/share-icon";
@@ -77,7 +77,7 @@ import { markLegTapHintSeen, shouldShowLegTapHint } from "@/lib/leg-tap-hint";
 import { buildNewsStories, setActiveNewsStory, type NewsStory } from "@/lib/news-feed";
 import { SandwichPositionCard } from "@/components/sandwich-position-card";
 import { ScrubReturnText } from "@/components/scrub-return-text";
-import { ComposeFab } from "@/components/compose-fab";
+import { useComposeAction } from "@/components/compose-fab";
 import { PositionTakesSection } from '@/components/position-takes-section';
 import { TakeCard } from '@/components/take-card';
 import {
@@ -184,7 +184,7 @@ import {
 import {
   settleJupUsdToCash,
 } from "@/lib/cash";
-import { useCash, type UseCashValue } from "@/hooks/use-cash";
+import { type UseCashValue } from "@/hooks/use-cash";
 import { useWalletStore } from "@/lib/wallet-store";
 import {
   SOLANA_USDC_MINT,
@@ -196,6 +196,9 @@ import {
   recordSandwichPositionSell,
   type SandwichPosition,
 } from "@/lib/sandwich-positions";
+import { demoSandwichExit } from "@/lib/demo-account";
+import { isDemoBuyMode } from "@/lib/demo-buy-mode";
+import { RotatingChevron } from "@/components/rotating-chevron";
 import {
   valueSandwichPosition,
 } from "@/lib/sandwich-holding-value";
@@ -233,6 +236,7 @@ import {
 } from "@/lib/native-zoom";
 import { detectLinkPreview, type LinkPreview } from "@/lib/link-preview";
 import type { ToastState } from "@/lib/toast-state";
+import { useSandwichTradeSheet } from "@/lib/sandwich-trade-sheet-store";
 import { HeartToggle, type HeartToggleRef } from "@/components/heart-toggle";
 import { HandleText } from "@/components/handle-text";
 import { DailyPromptBanner, DailyPromptCard } from "@/components/daily-prompt-card";
@@ -347,20 +351,20 @@ function FilterLabel({ label, active }: { label: string; active: boolean }) {
           {label}
         </Text>
       ))}
-      <MaskedView
-        maskElement={<Text style={styles.filterTextActive}>{label}</Text>}
-      >
-        <LinearGradient
-          colors={["#ffffff", "#ffffff", "#C3C9F0"]}
-          locations={[0, 0.45, 1]}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 0, y: 1 }}
+      <View>
+        <Text style={[styles.filterTextActive, { color: "#ffffff" }]}>{label}</Text>
+        <MaskedView
+          pointerEvents="none"
+          style={StyleSheet.absoluteFill}
+          maskElement={<Text style={[styles.filterTextActive, { color: "#ffffff" }]}>{label}</Text>}
         >
-          <Text style={[styles.filterTextActive, styles.filterFillMeasure]}>
-            {label}
-          </Text>
-        </LinearGradient>
-      </MaskedView>
+          <LinearGradient
+            colors={["rgba(255,255,255,0)", "rgba(255,255,255,0)", "#FAFAFD"]}
+            locations={[0, 0.9, 1]}
+            style={StyleSheet.absoluteFill}
+          />
+        </MaskedView>
+      </View>
     </View>
   );
 }
@@ -492,7 +496,7 @@ interface SandwichBuySheetProps {
   onPositionUpdated?: (position: SandwichPosition | null) => void;
 }
 
-function SandwichBuyPad({
+export function SandwichBuyPad({
   sandwich,
   onClose,
   onToast,
@@ -585,13 +589,15 @@ function SandwichBuyPad({
             : undefined
       }
       // Native iOS Liquid Glass confirm button (green for Buy, sky blue for Add cash).
-      useGreenGradientButton
       // The buy pad is a tall (82%) sheet — keep the amount + thesis fixed in
       // their flex slot instead of letting that area scroll/bounce when tapped.
       scrollEnabled={false}
       amount={buyAmount}
       message={sheetMessage}
       amountNote={predictionNote}
+      // Terms live in the footer, so an empty quote slot would lift the
+      // number above the midpoint between the sheet top and the post.
+      reservePreviewSpace={false}
       submitting={buying}
       canConfirm={canBuy}
       availableLabel={`Cash balance: $${cash.totalCash.toFixed(2)}`}
@@ -1058,7 +1064,7 @@ type ComposerDraft = {
   // draft isn't persisted yet so it has no server createdAt of its own.
   createdAt: string;
   /** The sandwich this draft remixes. Null for everything else. */
-  remixOf: { sandwichId: string; builderUsername: string | null } | null;
+  remixOf: { sandwichId: string; builderUsername: string | null; builderName: string | null; builderAvatarUrl: string | null; name: string; summary: string } | null;
 };
 
 function makeManualDraft(): ComposerDraft {
@@ -1102,13 +1108,13 @@ function draftForRemix(parent: Sandwich): ComposerDraft {
     ...makeManualDraft(),
     executionVenue: parent.venue === "perp" ? "perp" : null,
     name: parent.name,
-    summary: parent.summary,
+    summary: "",
     horizon: parent.horizon,
     direction: parent.direction,
     confidence: parent.confidence,
-    thesisText: parent.summary,
+    thesisText: "",
     legs: legs.map((leg) => sideForDirection(leg, parent.direction)),
-    remixOf: { sandwichId: parent.id, builderUsername: parent.builder?.username ?? null },
+    remixOf: { sandwichId: parent.id, builderUsername: parent.builder?.username ?? null, builderName: parent.builder?.name ?? null, builderAvatarUrl: parent.builder?.avatarUrl ?? null, name: parent.name, summary: parent.commentary?.trim() || parent.summary },
   };
 }
 
@@ -1289,6 +1295,7 @@ function perpStockToLeg(stock: Stock, market: PhoenixMarket, weightBps: number):
 export function SandwichComposerScreen() {
   const styles = useThemedStyles(makeStyles);
   const { colors } = useThemeStore();
+  const pickerInsets = useSafeAreaInsets();
   const {
     appUser,
     anonymousId,
@@ -1330,11 +1337,7 @@ export function SandwichComposerScreen() {
     return parent ? draftForRemix(parent) : null;
   });
   const isRemix = !!draft?.remixOf;
-  // The leg picker is NOT a second BottomSheetModal — nesting modals is broken
-  // on this stack (the pushed modal silently fails / races the parent's
-  // minimize animation). Instead it's an inline animated overlay rendered
-  // *inside* this same modal, mirroring the Buy pad over the detail sheet.
-  // See [[bottom-sheet-present-pattern]].
+  // iOS uses a UIKit page sheet; other platforms keep the inline picker.
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerInitialCategory, setPickerInitialCategory] = useState<LegCategory>("stocks");
   // pickerSlideY: 0 = fully visible, positive = slid down off-screen.
@@ -1351,6 +1354,10 @@ export function SandwichComposerScreen() {
   const openPicker = useCallback((initialCategory: LegCategory = "stocks") => {
     Keyboard.dismiss();
     setPickerInitialCategory(initialCategory);
+    if (Platform.OS === "ios") {
+      setPickerOpen(true);
+      return;
+    }
     pickerSlideY.value = 600;
     setPickerOpen(true);
     pickerSlideY.value = withTiming(0, { duration: 260 });
@@ -1358,6 +1365,10 @@ export function SandwichComposerScreen() {
 
   const closePicker = useCallback(() => {
     Keyboard.dismiss();
+    if (Platform.OS === "ios") {
+      setPickerOpen(false);
+      return;
+    }
     pickerSlideY.value = withTiming(600, { duration: Motion.duration.base }, (finished) => {
       if (finished) {
         runOnJS(setPickerOpen)(false);
@@ -1669,15 +1680,15 @@ export function SandwichComposerScreen() {
     !!draft &&
     !submitting &&
     draft.name.trim().length > 0 &&
-    // The thesis is optional when stacking by hand; AI drafts always carry one.
-    (draft.isManual || draft.summary.trim().length > 0) &&
+    // Remixes need the builder’s own thesis; other manual drafts may omit it.
+    (draft.remixOf ? draft.commentary.trim().length > 0 : draft.isManual || draft.summary.trim().length > 0) &&
     draft.legs.length > 0;
 
   const confirmDraft = useCallback(async () => {
     if (!draft || submitting) return;
     if (!canConfirm) {
       setError(
-        draft.isManual
+        draft.isManual && !draft.remixOf
           ? "Add a name and at least one leg before confirming."
           : "Add a name, a thesis, and at least one leg before confirming.",
       );
@@ -1758,6 +1769,33 @@ export function SandwichComposerScreen() {
       setSubmitting(false);
     }
   }, [anonymousId, appUser, canConfirm, close, dailyPrompt, draft, notifyCreated, submitting]);
+
+  const pickerContent = (
+    <LegPickerOverlay
+      active={pickerOpen}
+      initialCategory={pickerInitialCategory}
+      onClose={closePicker}
+      onPicked={addLeg}
+      onRemoveMint={removeLegByMint}
+      legsCount={draft ? draft.legs.length : 0}
+      selectedMints={
+        new Set(
+          draft?.legs
+            .filter(() => draft.executionVenue !== "perp")
+            .map((leg) => leg.mint)
+            .filter((mint): mint is string => !!mint) ?? [],
+        )
+      }
+      selectedPerpMints={
+        new Set(
+          draft?.legs
+            .filter(() => draft.executionVenue === "perp")
+            .map((leg) => leg.mint)
+            .filter((mint): mint is string => !!mint) ?? [],
+        )
+      }
+    />
+  );
 
   return (
     <KeyboardAvoidingView
@@ -1947,7 +1985,7 @@ export function SandwichComposerScreen() {
                   updateDraft((current) => ({ ...current, summary: value, thesisText: value }))
                 }
                 onChangeCommentary={(value) =>
-                  updateDraft((current) => ({ ...current, commentary: value }))
+                  updateDraft((current) => ({ ...current, commentary: value, ...(current.remixOf ? { summary: value, thesisText: value } : {}) }))
                 }
                 onRemoveLeg={removeLeg}
                 onCommitRatios={commitLegRatios}
@@ -1981,7 +2019,7 @@ export function SandwichComposerScreen() {
                 accessibilityRole="button"
                 accessibilityLabel={
                   mode === "review"
-                    ? isRemix ? "Preview remix" : "Preview sandwich"
+                    ? "Preview"
                     : mode === "preview"
                       ? isRemix ? "Publish remix" : "Confirm sandwich"
                       : "Cook sandwich"
@@ -2021,7 +2059,7 @@ export function SandwichComposerScreen() {
                         ? (generating ? stage ?? "Firing oven..." : "Generate")
                         : mode === "preview"
                           ? (submitting ? "Publishing..." : isRemix ? "Publish remix" : "Confirm sandwich")
-                          : isRemix ? "Preview remix" : "Preview"}
+                          : "Preview"}
                     </Text>
                   </GlassView>
                 ) : (
@@ -2034,7 +2072,7 @@ export function SandwichComposerScreen() {
                         ? (generating ? stage ?? "Firing oven..." : "Generate")
                         : mode === "preview"
                           ? (submitting ? "Publishing..." : isRemix ? "Publish remix" : "Confirm sandwich")
-                          : isRemix ? "Preview remix" : "Preview"}
+                          : "Preview"}
                     </Text>
                   </View>
                 )}
@@ -2043,9 +2081,24 @@ export function SandwichComposerScreen() {
         </View>
         )}
 
-        {/* Leg picker overlay — rendered inline over this screen (NOT a separate
-            route), mirroring the Buy pad over the detail screen. */}
-        {pickerOpen ? (
+        {/* UIKit owns the iOS sheet transition, dimming and swipe dismissal. */}
+        {Platform.OS === "ios" ? (
+          <Modal
+            visible={pickerOpen}
+            animationType="slide"
+            presentationStyle="pageSheet"
+            allowSwipeDismissal
+            onRequestClose={closePicker}
+          >
+            <GestureHandlerRootView style={{ flex: 1, backgroundColor: colors.background }}>
+              <View style={{ flex: 1, paddingTop: 16, paddingBottom: pickerInsets.bottom }}>
+                <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding">
+                  {pickerContent}
+                </KeyboardAvoidingView>
+              </View>
+            </GestureHandlerRootView>
+          </Modal>
+        ) : pickerOpen ? (
           <>
             <Animated.View style={[styles.legPickerBackdrop, pickerBackdropStyle]}>
               <Pressable
@@ -2063,30 +2116,7 @@ export function SandwichComposerScreen() {
                   <View style={styles.legPickerHandlePill} />
                 </View>
               </GestureDetector>
-              <LegPickerOverlay
-                active={pickerOpen}
-                initialCategory={pickerInitialCategory}
-                onClose={closePicker}
-                onPicked={addLeg}
-                onRemoveMint={removeLegByMint}
-                legsCount={draft ? draft.legs.length : 0}
-                selectedMints={
-                  new Set(
-                    draft?.legs
-                      .filter(() => draft.executionVenue !== "perp")
-                      .map((leg) => leg.mint)
-                      .filter((mint): mint is string => !!mint) ?? [],
-                  )
-                }
-                selectedPerpMints={
-                  new Set(
-                    draft?.legs
-                      .filter(() => draft.executionVenue === "perp")
-                      .map((leg) => leg.mint)
-                      .filter((mint): mint is string => !!mint) ?? [],
-                  )
-                }
-              />
+              {pickerContent}
             </Animated.View>
           </>
         ) : null}
@@ -3025,38 +3055,34 @@ function ComposerReviewView({
   const styles = useThemedStyles(makeStyles);
   const { colors } = useThemeStore();
 
-  // All leg allocations live in ONE shared-value array owned here so every
-  // row can read/write its own index without a per-frame React re-render.
-  // Dragging a leg rescales every other leg proportionally to keep the total
-  // at 100% (see {@link redistributeFromBase}). `trackWidth` is shared too (every slider track is
-  // the same width).
+  // Every ruler shares the same allocation array. Moving one leg rescales
+  // the others proportionally, keeping the displayed total at 100%.
   const ratios = useSharedValue<number[]>(
     fairPercents(draft.legs.map((leg) => leg.weightBps / 10000)).map((p) => p / 100),
   );
   const [liveRatios, setLiveRatios] = useState<number[]>(() =>
     fairPercents(draft.legs.map((leg) => leg.weightBps / 10000)).map((p) => p / 100),
   );
-  const trackWidth = useSharedValue(0);
   const legCount = draft.legs.length;
 
   // Re-seed the shared ratios whenever the leg set or weights change from a
   // non-drag source (add / remove / even-split / commit). This never fires
   // mid-drag because the draft is only committed on gesture end.
-  const weightsKey = draft.legs.map((leg) => `${leg.id}:${leg.weightBps}`).join("|");
   useEffect(() => {
     const rounded = fairPercents(draft.legs.map((leg) => leg.weightBps / 10000)).map((p) => p / 100);
     ratios.value = rounded;
     setLiveRatios(rounded);
-  }, [weightsKey]);
+  }, [draft.legs, ratios]);
 
   // Fair (largest-remainder) whole-percent labels for the initial paint,
   // before the first animated frame — guarantees they sum to 100 even when
   // the underlying split isn't evenly divisible (e.g. 3 legs at ~33.3% each).
   const initialPercents = useMemo(
     () => fairPercents(draft.legs.map((leg) => leg.weightBps / 10000)),
-    [weightsKey],
+    [draft.legs],
   );
 
+  const [addLegSize, setAddLegSize] = useState({ width: 0, height: 0 });
   const commentaryLeft = MAX_COMMENTARY_LENGTH - draft.commentary.length;
   const isShortDraft = draft.direction === "down";
   const isPerpDraft = draft.executionVenue === "perp";
@@ -3065,50 +3091,41 @@ function ComposerReviewView({
     <View>
       {draft.remixOf ? (
         <View style={styles.composerRemixThesis}>
-          <View style={styles.composerRemixPostHeader}>
-            {avatarUrl ? (
-              <Image source={{ uri: avatarUrl }} style={styles.composerRemixAvatar} />
+          <View style={styles.composerRemixSource}>
+            {draft.remixOf.builderAvatarUrl ? (
+              <Image source={{ uri: draft.remixOf.builderAvatarUrl }} style={styles.composerRemixSourceAvatar} />
             ) : (
-              <View style={[styles.composerRemixAvatar, styles.composerRemixAvatarFallback]}>
-                <Text style={styles.composerRemixAvatarInitial}>
-                  {(appUser?.name?.trim() || "You").slice(0, 1).toUpperCase()}
+              <View style={[styles.composerRemixSourceAvatar, styles.composerRemixSourceAvatarFallback]}>
+                <Text style={styles.composerRemixSourceInitial}>
+                  {(draft.remixOf.builderName || draft.remixOf.builderUsername || "?").slice(0, 1).toUpperCase()}
                 </Text>
               </View>
             )}
             <View style={styles.composerRemixPostIdentity}>
-              <Text style={styles.composerRemixPostName} numberOfLines={1}>
-                {appUser ? userDisplayName(appUser) : "You"}
-              </Text>
               <Text style={styles.composerRemixOrigin} numberOfLines={1}>
                 {draft.remixOf.builderUsername
-                  ? `remixing @${draft.remixOf.builderUsername}`
-                  : "remixing a sandwich"}
+                  ? `Remixing @${draft.remixOf.builderUsername.replace(/^@+/, "")}`
+                  : draft.remixOf.builderName ? `Remixing ${draft.remixOf.builderName}` : "Original post"}
+              </Text>
+              <Text style={styles.composerRemixSourceSummary} numberOfLines={2}>
+                {draft.remixOf.summary || draft.remixOf.name}
               </Text>
             </View>
-            <View style={styles.composerRemixDraftBadge}>
-              <Text style={styles.composerRemixDraftText}>draft</Text>
-            </View>
           </View>
-          <View style={styles.composerRemixPostBody}>
-            <TextInput
-              value={draft.name}
-              onChangeText={onChangeName}
-              accessibilityLabel="Remix title"
-              placeholder="Name your remix"
-              placeholderTextColor={colors.textTertiary}
-              style={styles.composerRemixTitleInput}
-            />
-            <TextInput
-              value={draft.summary}
-              onChangeText={onChangeSummary}
-              accessibilityLabel="Remix thesis"
-              placeholder="What's your thesis?"
-              placeholderTextColor={colors.textTertiary}
-              multiline
-              textAlignVertical="top"
-              style={styles.composerRemixThesisInput}
-            />
-          </View>
+          <Text style={styles.composerRemixLabel}>Your thesis</Text>
+          <TextInput
+            value={draft.commentary}
+            onChangeText={onChangeCommentary}
+            multiline
+            accessibilityLabel="Your remix thesis"
+            textAlignVertical="top"
+            autoCapitalize="sentences"
+            maxLength={MAX_COMMENTARY_LENGTH}
+            placeholder="What’s your view? Explain how you’d play it."
+            placeholderTextColor={colors.textTertiary}
+            style={styles.composerRemixThesisInput}
+          />
+
         </View>
       ) : null}
       <View style={styles.composerLegsHeader}>
@@ -3122,28 +3139,11 @@ function ComposerReviewView({
               onPress={onEvenSplit}
               style={styles.composerEvenSplitBtn}
             >
-              <Ionicons name="sync" size={12} color={colors.accentBlue} />
-              <Text style={styles.composerEvenSplitLabel}>even split</Text>
+              <Ionicons name="options-outline" size={14} color={colors.textSecondary} />
+              <Text style={styles.composerEvenSplitLabel}>Even split</Text>
             </PressableScale>
           ) : null}
-          {draft.legs.length > 0 ? (
-            <PressableScale
-              accessibilityRole="button"
-              accessibilityLabel={isPerpDraft ? "Change asset" : "Add another stock"}
-              hitSlop={8}
-              onPress={() => onAddLeg(isPerpDraft ? "perps" : "stocks")}
-              style={styles.composerAssetHeaderAction}
-            >
-              <Ionicons
-                name={isPerpDraft ? "swap-horizontal" : "add"}
-                size={13}
-                color={colors.text}
-              />
-              <Text style={styles.composerAssetHeaderActionLabel}>
-                {isPerpDraft ? "change" : "add stock"}
-              </Text>
-            </PressableScale>
-          ) : null}
+
         </View>
       </View>
 
@@ -3195,13 +3195,50 @@ function ComposerReviewView({
             liveRatios={liveRatios}
             setLiveRatios={setLiveRatios}
             initialPct={initialPercents[index] ?? 0}
-            trackWidth={trackWidth}
             onRemove={() => onRemoveLeg(leg.id)}
             onCommitRatios={onCommitRatios}
             sliderDisabled={legCount <= 1}
           />
         ))
       )}
+
+      {draft.legs.length > 0 ? (
+        <PressableScale
+          accessibilityRole="button"
+          accessibilityLabel={isPerpDraft ? "Change asset" : "Add another stock"}
+          onPress={() => onAddLeg(isPerpDraft ? "perps" : "stocks")}
+          style={styles.composerAddLeg}
+        >
+          <View
+            pointerEvents="none"
+            style={StyleSheet.absoluteFill}
+            onLayout={({ nativeEvent: { layout } }) => {
+              setAddLegSize((current) => current.width === layout.width && current.height === layout.height
+                ? current : { width: layout.width, height: layout.height });
+            }}
+          >
+            {addLegSize.width > 4 && addLegSize.height > 4 ? (
+              <Svg width="100%" height="100%" viewBox={`0 0 ${addLegSize.width} ${addLegSize.height}`}>
+                <Rect
+                  x={2}
+                  y={2}
+                  width={addLegSize.width - 4}
+                  height={addLegSize.height - 4}
+                  rx={12}
+                  fill="none"
+                  stroke={colors.border}
+                  strokeWidth={1.5}
+                  strokeDasharray="8 5"
+                />
+              </Svg>
+            ) : null}
+          </View>
+          <Ionicons name={isPerpDraft ? "swap-horizontal" : "add"} size={18} color={colors.textSecondary} />
+          <Text style={styles.composerAddLegLabel}>
+            {isPerpDraft ? "Change asset" : "Add stock"}
+          </Text>
+        </PressableScale>
+      ) : null}
 
       {isPerpDraft && draft.legs.length === 1 ? (
         <>
@@ -3256,6 +3293,8 @@ function ComposerReviewView({
         </>
       ) : null}
 
+      {!draft.remixOf ? (
+        <>
       {/* Choose the composition first, then explain the take. */}
       <View style={styles.composerLegsHeader}>
         <Text style={styles.composerFieldLabel}>your take</Text>
@@ -3286,14 +3325,11 @@ function ComposerReviewView({
           style={styles.composerCommentaryInput}
         />
       </View>
+        </>
+      ) : null}
     </View>
   );
 }
-
-const AnimatedTextInput = Animated.createAnimatedComponent(TextInput);
-
-const SLIDER_THUMB_DIAM = 24;
-const SLIDER_THUMB_R = SLIDER_THUMB_DIAM / 2;
 
 /**
  * Set leg `index` to `target` (0–1) and rescale every OTHER leg proportionally
@@ -3343,20 +3379,6 @@ function redistributeFromBase(base: number[], index: number, target: number): nu
   return out;
 }
 
-function getSideMeta(leg: SandwichLeg) {
-  const isMarket = leg.type === "prediction_market";
-  const isShortOrNo = isMarket
-    ? leg.side.toLowerCase() === "no"
-    : leg.side.toLowerCase() === "short" || leg.side.toLowerCase() === "sell";
-  const label = isMarket
-    ? isShortOrNo ? "NO" : "YES"
-    : isShortOrNo ? "SHORT" : "LONG";
-  const color = isMarket
-    ? isShortOrNo ? "#7d3ad6" : "#1d6cd6"
-    : isShortOrNo ? "#EB1C40" : "#1f9d6b";
-  return { label, color };
-}
-
 function ComposerLegRow({
   leg,
   index,
@@ -3364,7 +3386,6 @@ function ComposerLegRow({
   liveRatios,
   setLiveRatios,
   initialPct,
-  trackWidth,
   onRemove,
   onCommitRatios,
   sliderDisabled = false,
@@ -3378,8 +3399,6 @@ function ComposerLegRow({
   // Fair (largest-remainder) whole-percent value for this leg's very first
   // paint, computed across all legs so every row's label sums to exactly 100.
   initialPct: number;
-  // Shared track width — every slider track is the same width.
-  trackWidth: SharedValue<number>;
   onRemove: () => void;
   // Commit the final ratios array to React state (called once, on gesture end).
   onCommitRatios: (ratios: number[]) => void;
@@ -3387,127 +3406,23 @@ function ComposerLegRow({
 }) {
   const styles = useThemedStyles(makeStyles);
   const { colors } = useThemeStore();
-  const { label: sideLabel, color: sideColor } = getSideMeta(leg);
 
-  const lastHapticBucket = useSharedValue(-1);
-
-  const fireHapticLight = useCallback(() => {
-    void Haptics.selectionAsync();
-  }, []);
-
-  const fireHapticEdge = useCallback(() => {
-    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-  }, []);
-
-  // The split when the current drag began. Every update rescales the other
-  // legs from this snapshot (see {@link redistributeFromBase}), so the dragged
-  // leg can travel the full 0–100% and every other leg follows it.
-  const dragBase = useSharedValue<number[] | null>(null);
-  const nativeBase = useRef<number[] | null>(null);
-  const nativeDirty = useRef(false);
-
-  const commitNativeRatio = useCallback(() => {
-    nativeBase.current = null;
-    if (!nativeDirty.current) return;
-    nativeDirty.current = false;
-    onCommitRatios(ratios.value.slice());
-  }, [onCommitRatios, ratios]);
-
-  // SwiftUI owns the thumb while a finger is down. Keep the live split in the
-  // shared array + React state (so the OTHER native sliders move with it);
-  // only the completed split is sent through to the draft.
-  const adjustNativeRatio = (target: number) => {
-    if (ratios.value.length < 2) return;
-    if (!nativeBase.current) nativeBase.current = ratios.value.slice();
-    const next = redistributeFromBase(nativeBase.current, index, target);
-    if (next.every((r, i) => r === ratios.value[i])) return;
+  const dragBase = useRef<number[] | null>(null);
+  const changeAllocation = (percent: number, commit = false) => {
+    if (!dragBase.current) dragBase.current = ratios.value.slice();
+    const next = redistributeFromBase(dragBase.current, index, percent / 100);
     ratios.value = next;
     setLiveRatios(next);
-    nativeDirty.current = true;
+    if (commit) {
+      dragBase.current = null;
+      onCommitRatios(next);
+    }
   };
-
-  const adjustFromDrag = (target: number) => {
-    "worklet";
-    if (ratios.value.length < 2) return;
-    if (!dragBase.value) dragBase.value = ratios.value.slice();
-    ratios.value = redistributeFromBase(dragBase.value, index, target);
-  };
-
-  const pan = Gesture.Pan()
-    .minDistance(0)
-    .activeOffsetX([-4, 4])
-    .failOffsetY([-8, 8])
-    .onStart((e) => {
-      dragBase.value = ratios.value.slice();
-      lastHapticBucket.value = -1;
-      if (trackWidth.value <= SLIDER_THUMB_DIAM) return;
-      adjustFromDrag((e.x - SLIDER_THUMB_R) / (trackWidth.value - SLIDER_THUMB_DIAM));
-    })
-    .onUpdate((e) => {
-      if (trackWidth.value <= SLIDER_THUMB_DIAM) return;
-      const newRatio = Math.max(0, Math.min(1,
-        (e.x - SLIDER_THUMB_R) / (trackWidth.value - SLIDER_THUMB_DIAM)));
-      adjustFromDrag(newRatio);
-
-      // Fine, continuous haptic texture instead of coarse 25% detents: a light
-      // selection tick every ~5% reads as a smooth dial rather than checkpoints.
-      // The 0% / 100% ends get a slightly firmer impact so the limits are felt.
-      const bucket = Math.round((ratios.value[index] ?? 0) * 20);
-      if (bucket !== lastHapticBucket.value) {
-        const wasEdge = bucket === 0 || bucket === 20;
-        lastHapticBucket.value = bucket;
-        runOnJS(wasEdge ? fireHapticEdge : fireHapticLight)();
-      }
-    })
-    .onEnd(() => {
-      dragBase.value = null;
-      // Push the final distribution into React state exactly once.
-      runOnJS(onCommitRatios)(ratios.value);
-    });
-
-  const fillAnimStyle = useAnimatedStyle(() => {
-    const r = ratios.value[index] ?? 0;
-    return { width: SLIDER_THUMB_R + r * (trackWidth.value - SLIDER_THUMB_DIAM) };
-  });
-
-  const thumbAnimStyle = useAnimatedStyle(() => {
-    const r = ratios.value[index] ?? 0;
-    const x = r * (trackWidth.value - SLIDER_THUMB_DIAM);
-    return {
-      transform: [{
-        translateX: Math.max(0, x),
-      }],
-    };
-  });
-
-  // Drive the live % through the `text` prop, NOT `value`: Reanimated only
-  // special-cases `text` for on-the-UI-thread TextInput updates, so `value`
-  // never repaints while dragging. Cast because `text` isn't in TextInputProps.
-  // Uses the fair (largest-remainder) rounding over ALL legs' live ratios, not
-  // a naive per-leg Math.round, so the labels the user sees always sum to
-  // exactly 100 — never 99 — even for splits like three legs at ~33.3% each.
-  const labelAnimProps = useAnimatedProps(
-    () =>
-      ({
-        text: `${fairPercents(ratios.value)[index] ?? 0}%`,
-      }) as never,
-  );
-
-  // Initial paint before the first animated frame (the field is uncontrolled).
-  const initialPctLabel = `${initialPct}%`;
-
-  const sideClass =
-    leg.type === "prediction_market"
-      ? leg.side.toLowerCase() === "no"
-        ? styles.composerSideNo
-        : styles.composerSideYes
-      : sideLabel === "SHORT"
-        ? styles.composerSideShort
-        : styles.composerSideLong;
+  const percent = fairPercents(liveRatios)[index] ?? initialPct;
 
   return (
     <View style={styles.composerLegRow}>
-      {/* Header: icon | name + subtitle | side chip | remove */}
+      {/* Header: icon | name + subtitle | allocation | remove */}
       <View style={styles.composerLegHead}>
         <RemoteAssetLogo
           uri={leg.imageUrl}
@@ -3534,99 +3449,36 @@ function ComposerLegRow({
                 : "prediction market"}
           </Text>
         </View>
-        {/* Perps choose direction once in the Outlook control below; repeating
-            it here creates two competing controls for the same state. */}
-        {leg.venue === "spot" ? (
-          <View style={[styles.composerSideChip, sideClass]}>
-            <Text style={styles.composerSideLabel}>{sideLabel}</Text>
-          </View>
-        ) : null}
+        <Text style={styles.composerAllocationPct}>{percent}%</Text>
         <PressableScale
           accessibilityRole="button"
-          accessibilityLabel="Remove leg"
+          accessibilityLabel={`Remove ${leg.symbol ?? leg.label}`}
+          hitSlop={8}
           onPress={onRemove}
           style={styles.composerLegRemove}
         >
-          <Ionicons name="trash" size={15} color={colors.negative} />
+          <Ionicons name="close" size={16} color={colors.textTertiary} />
         </PressableScale>
       </View>
 
-      {/* A sole asset is necessarily 100%; only show allocation controls when
-          there is an actual split to edit. */}
-      {!sliderDisabled && Platform.OS === "ios" ? (
-        <View style={styles.composerSliderOuter}>
-          <View style={styles.composerSliderTrackRow}>
-            <Host style={styles.composerNativeSliderHost}>
-              <Slider
-                value={liveRatios[index] ?? initialPct / 100}
-                min={0}
-                max={1}
-                color={colors.actionPrimary}
-                onValueChange={adjustNativeRatio}
-                onEditingChange={(editing, value) => {
-                  if (editing) {
-                    nativeBase.current = ratios.value.slice();
-                  } else {
-                    adjustNativeRatio(value);
-                    commitNativeRatio();
-                  }
-                }}
-              />
-            </Host>
-          </View>
-          <View style={styles.composerSliderMeta}>
-            <AnimatedTextInput
-              style={[styles.composerSliderLabel, { color: sideColor }]}
-              animatedProps={labelAnimProps}
-              defaultValue={initialPctLabel}
-              editable={false}
-              underlineColorAndroid="transparent"
-              pointerEvents="none"
-            />
-          </View>
-        </View>
-      ) : !sliderDisabled ? (
-        <GestureDetector gesture={pan}>
-          <View style={styles.composerSliderOuter}>
-            {/* Track row: 28pt tall so both the 8pt track and 24pt thumb fit */}
-            <View
-              style={styles.composerSliderTrackRow}
-              onLayout={(e) => {
-                trackWidth.value = e.nativeEvent.layout.width;
-              }}
-            >
-              {/* Track background (abs centered vertically) */}
-              <View style={styles.composerSliderTrack}>
-                <Animated.View
-                  style={[
-                    styles.composerSliderFill,
-                    { backgroundColor: sideColor + "44" },
-                    fillAnimStyle,
-                  ]}
-                />
-              </View>
-              {/* Thumb — hidden when slider is locked */}
-              <Animated.View
-                style={[
-                  styles.composerSliderThumb,
-                  { backgroundColor: sideColor, shadowColor: sideColor },
-                  thumbAnimStyle,
-                ]}
-              />
-            </View>
-            {/* Meta row: live % + contextual hint */}
-            <View style={styles.composerSliderMeta}>
-              <AnimatedTextInput
-                style={[styles.composerSliderLabel, { color: sideColor }]}
-                animatedProps={labelAnimProps}
-                defaultValue={initialPctLabel}
-                editable={false}
-                underlineColorAndroid="transparent"
-                pointerEvents="none"
-              />
-            </View>
-          </View>
-        </GestureDetector>
+      {!sliderDisabled ? (
+        <ScaleRuler
+          value={percent}
+          min={0}
+          max={100}
+          step={1}
+          majorEvery={25}
+          accent={colors.actionPrimary}
+          formatValue={(value) => `${value}%`}
+          formatTick={(value) => `${value}`}
+          hideBubble
+          height={28}
+          relativeDrag
+          smoothDrag
+          hapticEvery={5}
+          onChange={(value) => changeAllocation(value)}
+          onCommit={(value) => changeAllocation(value, true)}
+        />
       ) : null}
     </View>
   );
@@ -4412,21 +4264,31 @@ export function SandwichSellPad({
         const fractionBps = sellFraction >= 0.995
           ? 10_000
           : Math.max(1, Math.round(sellFraction * 10_000));
-        const started = await startSandwichSell(position.sandwichId, fractionBps);
-        if (started.status !== "needs_signature" || started.transactions.length === 0) {
-          throw new Error(started.status === "failed" ? started.reason : "Sell was not ready to sign.");
-        }
-        const provider = await wallet.getProvider();
-        const signed: string[] = [];
-        for (const transaction of started.transactions) {
-          const signedPayload = await provider.request({
-            method: "signTransaction",
-            params: { transaction: deserializeJupiterTransaction(transaction) },
-          });
-          signed.push(Buffer.from(serializeSignedTransaction(signedPayload.signedTransaction)).toString("base64"));
-        }
-        const result = await submitSignedBasketBuy(started.basketRunId, signed);
-        if (result.status === "failed") throw new Error(result.reason || "Sell did not confirm.");
+        // Demo mode exits against the paper account at the value on screen.
+        const result = isDemoBuyMode()
+          ? await demoSandwichExit({
+              sandwichId: position.sandwichId,
+              fraction: sellFraction,
+              proceedsUsd: positionValue * sellFraction,
+            })
+          : await (async () => {
+            const started = await startSandwichSell(position.sandwichId, fractionBps);
+            if (started.status !== "needs_signature" || started.transactions.length === 0) {
+              throw new Error(started.status === "failed" ? started.reason : "Sell was not ready to sign.");
+            }
+            const provider = await wallet.getProvider();
+            const signed: string[] = [];
+            for (const transaction of started.transactions) {
+              const signedPayload = await provider.request({
+                method: "signTransaction",
+                params: { transaction: deserializeJupiterTransaction(transaction) },
+              });
+              signed.push(Buffer.from(serializeSignedTransaction(signedPayload.signedTransaction)).toString("base64"));
+            }
+            const submitted = await submitSignedBasketBuy(started.basketRunId, signed);
+            if (submitted.status === "failed") throw new Error(submitted.reason || "Sell did not confirm.");
+            return submitted;
+            })();
         const attempted = result.status === "partial"
           ? result.landedLegIds.length + result.failedLegIds.length
           : position.legs.length;
@@ -4624,7 +4486,6 @@ export function SandwichSellPad({
       title=""
       // Liquid glass confirm, in the sell accent — the buy pad's button with
       // the side's own color, not a green one bolted onto a sell.
-      useGreenGradientButton
       // Same deliberate gesture the buy takes. Suppressed automatically while
       // `confirmLabel` is set, so a blocked prediction close still renders the
       // plain button that can carry the reason.
@@ -4726,7 +4587,6 @@ export function SandwichDetailScreen() {
     toggleLike,
     updateCommentCount,
     share,
-    onToast,
     open: openSandwichDetail,
   } =
     useSandwichDetail();
@@ -4744,11 +4604,8 @@ export function SandwichDetailScreen() {
     return peekById(idParam);
   }, [activeSandwich, idParam, peekById]);
   const bookmarked = sandwich ? isSaved("sandwich", sandwich.id) : false;
-  // Read cash + wallet store HERE so the buy pad gets live wallet data as props.
-  const cash = useCash();
-  const walletStore = useWalletStore();
-  const [buySheetOpen, setBuySheetOpen] = useState(false);
-  const [tradeSide, setTradeSide] = useState<"buy" | "sell">("buy");
+  // The buy / sell pad is a native form sheet route (`(app)/sandwich-trade`).
+  const tradeSheet = useSandwichTradeSheet();
   const [thesisExpanded, setThesisExpanded] = useState(false);
   const [showShareNudge, setShowShareNudge] = useState(false);
   const [creatorFollowing, setCreatorFollowing] = useState(false);
@@ -4769,13 +4626,6 @@ export function SandwichDetailScreen() {
   const [chartRange, setChartRange] = useState<SandwichChartRange>(() =>
     defaultChartRange(),
   );
-  // Open progress of the buy pad, owned here (not by the overlay) because the
-  // detail page recedes behind it — see `sandwichContentStyle`.
-  const buySheetIndex = useSharedValue(-1);
-  // Live finger offset while dragging the pad down to dismiss. Added on top of
-  // the index-driven translate so the sheet follows the drag, then either snaps
-  // back to 0 or rides the close animation out.
-  const buyDragY = useSharedValue(0);
   // Leg detail card — a hero expansion, not a sheet. `legExpand` drives the
   // single 0→1 progress: 0 is the card sitting exactly on top of the tapped
   // row, 1 is the opened card. Every geometry value interpolates between those
@@ -5047,33 +4897,6 @@ export function SandwichDetailScreen() {
     });
     return () => cancelAnimationFrame(frame);
   }, [commentsParam, sandwich]);
-  const sandwichContentStyle = useAnimatedStyle(() => {
-    // Only the buy pad recedes the page. The leg card must NOT: it grows out of
-    // a row on this page, and scaling the page mid-expansion would drag the
-    // source row away from the rect the card started at, breaking the illusion.
-    const scale = interpolate(
-      buySheetIndex.value,
-      [-1, 0],
-      [1, 0.94],
-      Extrapolation.CLAMP,
-    );
-    const translateY = interpolate(
-      buySheetIndex.value,
-      [-1, 0],
-      [0, -10],
-      Extrapolation.CLAMP,
-    );
-    const borderRadius = interpolate(
-      buySheetIndex.value,
-      [-1, 0],
-      [0, 16],
-      Extrapolation.CLAMP,
-    );
-    return {
-      borderRadius,
-      transform: [{ scale }, { translateY }],
-    };
-  });
   const legBackdropStyle = useAnimatedStyle(() => ({
     opacity:
       interpolate(legExpand.value, [0, 1], [0, 1], Extrapolation.CLAMP) *
@@ -5131,112 +4954,9 @@ export function SandwichDetailScreen() {
       Extrapolation.CLAMP,
     ),
   }));
-  const buyBackdropStyle = useAnimatedStyle(() => ({
-    opacity:
-      interpolate(buySheetIndex.value, [-1, 0], [0, 1], Extrapolation.CLAMP) *
-      interpolate(buyDragY.value, [0, 300], [1, 0.2], Extrapolation.CLAMP),
-  }));
-  const buyOverlayStyle = useAnimatedStyle(() => ({
-    opacity: interpolate(buySheetIndex.value, [-1, 0], [0, 1], Extrapolation.CLAMP),
-    transform: [
-      {
-        translateY:
-          interpolate(buySheetIndex.value, [-1, 0], [72, 0], Extrapolation.CLAMP) +
-          buyDragY.value,
-      },
-    ],
-  }));
-  const hideBuySheetImmediately = useCallback(() => {
-    Keyboard.dismiss();
-    buySheetIndex.value = -1;
-    buyDragY.value = 0;
-    setBuySheetOpen(false);
-  }, [buySheetIndex, buyDragY]);
-  const closeBuySheet = useCallback(() => {
-    Keyboard.dismiss();
-    // Ride any in-progress drag out alongside the index animation so the sheet
-    // slides cleanly off-screen. Springs (not timing) so a fast re-tap on the
-    // trigger can grab the sheet mid-close and reverse it without a hard cut
-    // (Apple §3 interruptibility). Critically damped — no bounce on a
-    // non-momentum close.
-    buyDragY.value = withSpring(0, Motion.spring.snap);
-    buySheetIndex.value = withSpring(
-      -1,
-      Motion.spring.reveal,
-      (finished) => {
-        if (finished) {
-          runOnJS(setBuySheetOpen)(false);
-        }
-      },
-    );
-  }, [buySheetIndex, buyDragY]);
-  // Drag-down-to-dismiss for the pad. Requires a deliberate vertical move before
-  // it claims the gesture (so taps on the amount/buttons still work). Downward
-  // drag tracks 1:1; upward drag rubber-bands (Apple §9 — no hard walls). At
-  // release, Apple momentum projection (§6) unifies distance + velocity into a
-  // single dismiss decision.
-  const buyPan = useMemo(
-    () =>
-      Gesture.Pan()
-        .activeOffsetY(12)
-        // Yield immediately to the leverage ruler's horizontal scrub. Waiting
-        // 20pt here made the parent sheet hold the gesture long enough for the
-        // sandwich-perp slider to feel inert.
-        .failOffsetX([-4, 4])
-        .onUpdate((e) => {
-          "worklet";
-          if (e.translationY >= 0) {
-            buyDragY.value = e.translationY;
-          } else {
-            const overshoot = -e.translationY;
-            const dim = 480; // roughly a sheet's vertical dimension
-            const damped = (overshoot * dim * 0.55) / (dim + 0.55 * overshoot);
-            buyDragY.value = -damped;
-          }
-        })
-        .onEnd((e) => {
-          "worklet";
-          const decel = 0.998;
-          const projected = e.translationY + (e.velocityY / 1000) * (decel / (1 - decel));
-          if (projected > 160) {
-            runOnJS(closeBuySheet)();
-          } else {
-            buyDragY.value = withSpring(0, { ...Motion.spring.settle, velocity: e.velocityY });
-          }
-        }),
-    [buyDragY, closeBuySheet],
-  );
+  const hideBuySheetImmediately = tradeSheet.close;
 
-  const openBuySheet = useCallback(() => {
-    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    Keyboard.dismiss();
-    buyDragY.value = 0;
-    setTradeSide("buy");
-    setBuySheetOpen(true);
-    // Critically damped spring — purposeful open, no overshoot (Apple §4).
-    buySheetIndex.value = withSpring(0, Motion.spring.reveal);
-  }, [buySheetIndex, buyDragY]);
 
-  const openSellSheet = useCallback(() => {
-    if (!position) return;
-    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    Keyboard.dismiss();
-    buyDragY.value = 0;
-    setTradeSide("sell");
-    setBuySheetOpen(true);
-    buySheetIndex.value = withSpring(0, Motion.spring.reveal);
-  }, [buySheetIndex, buyDragY, position]);
-
-  // Arrived here from a Buy tap on a feed card: land on the amount pad rather
-  // than making the user find the button a second time. Guarded per sandwich so
-  // dismissing the pad doesn't immediately reopen it.
-  useEffect(() => {
-    if (buyParam !== "1" || !sandwich) return;
-    if (buyAutoOpenedRef.current === sandwich.id) return;
-    buyAutoOpenedRef.current = sandwich.id;
-    const frame = requestAnimationFrame(() => openBuySheet());
-    return () => cancelAnimationFrame(frame);
-  }, [buyParam, sandwich, openBuySheet]);
 
   // The same native form sheet route Home's "+ Add cash" opens, so there is
   // one Add cash surface in the app. The buy pad closes first: it lives in the
@@ -5245,6 +4965,39 @@ export function SandwichDetailScreen() {
     hideBuySheetImmediately();
     router.push("/deposit");
   }, [hideBuySheetImmediately, router]);
+
+  const openTradeSheet = useCallback(
+    (side: "buy" | "sell", initialAmount: string | null = null) => {
+      if (!sandwich) return;
+      if (side === "sell" && !position) return;
+      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      Keyboard.dismiss();
+      tradeSheet.open({
+        side,
+        sandwich,
+        position,
+        initialAmount,
+        onCelebrate: tradeFx.playSandwich,
+        onPositionUpdated: updatePosition,
+        onRequestAddCash: openDepositSheet,
+      });
+    },
+    [openDepositSheet, position, sandwich, tradeFx.playSandwich, tradeSheet, updatePosition],
+  );
+  const openBuySheet = useCallback(() => openTradeSheet("buy"), [openTradeSheet]);
+  const openSellSheet = useCallback(() => openTradeSheet("sell"), [openTradeSheet]);
+
+  // Arrived here from a Buy tap on a feed card: land on the amount pad rather
+  // than making the user find the button a second time. Guarded per sandwich so
+  // dismissing the pad doesn't immediately reopen it.
+  useEffect(() => {
+    if (buyParam !== "1" || !sandwich) return;
+    if (buyAutoOpenedRef.current === sandwich.id) return;
+    buyAutoOpenedRef.current = sandwich.id;
+    const initialAmount = amountParam && /^\d+(\.\d+)?$/.test(amountParam) ? amountParam : null;
+    const frame = requestAnimationFrame(() => openTradeSheet("buy", initialAmount));
+    return () => cancelAnimationFrame(frame);
+  }, [amountParam, buyParam, sandwich, openTradeSheet]);
 
   const collapseLegCardToRow = useCallback(() => {
     // Cancel a stock lookup if the user dismisses the card before it resolves.
@@ -5425,10 +5178,12 @@ export function SandwichDetailScreen() {
   // throws the sheet off, and a slow drag only commits if you've actually
   // pulled it far enough.
 
-  // Reset transient view state whenever a different sandwich is shown.
+  // Reset transient view state whenever a different sandwich is shown. The
+  // trade pad is not reset here: it is a native sheet covering this screen, so
+  // the sandwich cannot change under it — and closing it on every `pnlPct`
+  // tick would yank it away mid-entry.
   useEffect(() => {
     legAssetRequestRef.current += 1;
-    hideBuySheetImmediately();
     legExpand.value = 0;
     legDragY.value = 0;
     legRowVisible.value = 1;
@@ -5444,7 +5199,6 @@ export function SandwichDetailScreen() {
     sandwich?.pnlPct,
     sandwich?.createdAt,
     chartReturnActive,
-    hideBuySheetImmediately,
     legExpand,
     legDragY,
     legRowVisible,
@@ -5484,7 +5238,7 @@ export function SandwichDetailScreen() {
               // in-screen content, so it would float over the buy pad, asset
               // card, and embedded stock sheet. Keep it hidden for the entire
               // overlay lifecycle, including closing animations.
-              headerShown: !buySheetOpen && !legCardLeg,
+              headerShown: !legCardLeg,
               headerTitle:
                 showStickyHeader && sandwich && heroIdentity
                   ? () => (
@@ -5525,7 +5279,7 @@ export function SandwichDetailScreen() {
               headerRight: undefined,
             }}
           />
-          <Animated.View style={[{ flex: 1 }, sandwichContentStyle]}>
+          <Animated.View style={{ flex: 1 }}>
             <ScrollView
               keyboardShouldPersistTaps="handled"
               onScrollBeginDrag={Keyboard.dismiss}
@@ -6048,11 +5802,7 @@ export function SandwichDetailScreen() {
                         <Text style={styles.showMoreText}>
                           {thesisExpanded ? "show less" : "show more"}
                         </Text>
-                        <Ionicons
-                          name={thesisExpanded ? "chevron-up" : "chevron-down"}
-                          size={13}
-                          color={colors.textSecondary}
-                        />
+                        <RotatingChevron up={thesisExpanded} size={13} color={colors.textSecondary} />
                       </Pressable>
                       </View>
                     </ScaledSandwichSection>
@@ -6074,7 +5824,7 @@ export function SandwichDetailScreen() {
                 </>
               )}
             </ScrollView>
-            {sandwich && !buySheetOpen ? (
+            {sandwich ? (
               <View
                 pointerEvents="box-none"
                 style={[
@@ -6196,51 +5946,6 @@ export function SandwichDetailScreen() {
             ) : null}
           </Animated.View>
 
-        {/* Buy pad overlay — slides up over the detail content, in-screen. */}
-        {buySheetOpen ? (
-          <>
-            <Animated.View style={[styles.buySheetBackdrop, buyBackdropStyle]}>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={`Close ${tradeSide} sheet`}
-                onPress={closeBuySheet}
-                style={StyleSheet.absoluteFill}
-              />
-            </Animated.View>
-            <GestureDetector gesture={buyPan}>
-              <Animated.View
-                style={[
-                  styles.buySheetOverlay,
-                  buyOverlayStyle,
-                  { paddingBottom: Math.max(insets.bottom, 40) },
-                ]}>
-                <View style={styles.buySheetHandle} />
-                {tradeSide === "sell" && position ? (
-                  <SandwichSellPad
-                    position={position}
-                    sandwich={sandwich}
-                    onClose={closeBuySheet}
-                    onToast={onToast}
-                    onCelebrate={tradeFx.playSandwich}
-                    onPositionUpdated={updatePosition}
-                  />
-                ) : (
-                  <SandwichBuyPad
-                    sandwich={sandwich}
-                    onClose={closeBuySheet}
-                    onToast={onToast}
-                    onCelebrate={tradeFx.playSandwich}
-                    cash={cash}
-                    walletStore={walletStore}
-                    onRequestAddCash={openDepositSheet}
-                    onPositionUpdated={updatePosition}
-                    initialAmount={buyParam === "1" && amountParam && /^\d+(\.\d+)?$/.test(amountParam) ? amountParam : null}
-                  />
-                )}
-              </Animated.View>
-            </GestureDetector>
-          </>
-        ) : null}
         {/* Leg detail card — a hero that grows out of the tapped row. */}
         {legCardLeg ? (
           <>
@@ -6819,11 +6524,12 @@ export function SandwichScreen() {
   // Compose FAB → open the composer directly. (Previously the "+" circle
   // bloomed to fill the screen before the route pushed — that full-screen blue
   // flash was removed in favor of a plain slide-in push.)
+  // The "+" itself is the tabs layout's single instance (shared with Home);
+  // the feed only supplies what it does here.
   const openComposer = useCallback(() => {
-    Keyboard.dismiss();
-    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     composer.open({ onCreated: handleSandwichCreated });
   }, [composer, handleSandwichCreated]);
+  useComposeAction("sandwich", openComposer);
   const [activeTab, setActiveTab] = useState<"for-you" | "news">("for-you");
   const [newsItems, setNewsItems] = useState<NewsItem[]>([]);
   // Stocks + crypto the feed's headlines are matched against for ticker chips.
@@ -7197,13 +6903,6 @@ export function SandwichScreen() {
         </View>
       </View>
 
-      {!loading ? (
-        <ComposeFab
-          onPress={openComposer}
-          bottom={composeFabBottom}
-          right={16 + Math.max(insets.right, 0)}
-        />
-      ) : null}
 
       <SandwichShareSheet ref={shareSheetRef} />
       <StockDetailSheet
@@ -7429,9 +7128,6 @@ const makeStyles = (c: ThemeColors) => {
     fontFamily: F,
     textTransform: "capitalize",
     color: c.text,
-  },
-  filterFillMeasure: {
-    opacity: 0,
   },
   filterOutline: {
     position: "absolute",
@@ -10215,8 +9911,6 @@ const makeStyles = (c: ThemeColors) => {
     paddingHorizontal: CTA.inset,
     paddingTop: 8,
     paddingBottom: CTA.inset,
-    borderTopWidth: 1,
-    borderColor: c.border,
   },
   reviewHeaderRow: {
     flexDirection: "row",
@@ -10408,100 +10102,82 @@ const makeStyles = (c: ThemeColors) => {
     marginBottom: 6,
   },
   composerRemixThesis: {
-    gap: 8,
-    paddingVertical: 6,
     marginTop: 8,
-    marginBottom: 2,
+    gap: 12,
   },
-  composerRemixPostHeader: {
+  composerRemixSource: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 9,
-  },
-  composerRemixAvatar: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-  },
-  composerRemixAvatarFallback: {
-    backgroundColor: c.text,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  composerRemixAvatarInitial: {
-    color: c.background,
-    fontSize: 14,
-    fontWeight: "900",
-    fontFamily: F,
+    gap: 10,
+    padding: 12,
+    borderRadius: 14,
+    boxShadow: [{
+      offsetX: 0,
+      offsetY: 2,
+      blurRadius: 10,
+      color: withAlpha(c.shadow, 0.08),
+    }],
   },
   composerRemixPostIdentity: {
     flex: 1,
     minWidth: 0,
-  },
-  composerRemixPostName: {
-    color: c.text,
-    fontSize: 13,
-    fontWeight: "800",
-    fontFamily: F,
+    gap: 3,
   },
   composerRemixOrigin: {
     color: c.textTertiary,
-    fontSize: 11,
-    fontWeight: "600",
+    fontSize: 12,
+    fontWeight: "500",
     fontFamily: F,
   },
-  composerRemixDraftBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 999,
-    backgroundColor: c.surfaceAlt,
+  composerRemixSourceAvatar: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
   },
-  composerRemixDraftText: {
-    color: c.textTertiary,
-    fontSize: 10,
+  composerRemixSourceAvatarFallback: {
+    backgroundColor: c.border,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  composerRemixSourceInitial: {
+    color: c.textSecondary,
+    fontSize: 14,
     fontWeight: "700",
     fontFamily: F,
   },
-  composerRemixPostBody: {
-    paddingLeft: 43,
-    gap: 4,
-  },
-  composerRemixTitleInput: {
-    color: c.text,
-    fontSize: 16,
-    fontWeight: "800",
-    fontFamily: F,
-    paddingVertical: 0,
-  },
-  composerRemixThesisInput: {
+  composerRemixSourceSummary: {
     color: c.textSecondary,
     fontSize: 13,
     lineHeight: 18,
+    fontFamily: F,
+  },
+  composerRemixLabel: {
+    marginTop: 8,
+    color: c.text,
+    fontSize: 16,
+    fontWeight: "700",
+    fontFamily: F,
+  },
+  composerRemixThesisInput: {
+    color: c.text,
+    fontSize: 18,
+    lineHeight: 26,
     fontWeight: "500",
     fontFamily: F,
+    minHeight: 112,
     paddingVertical: 0,
-    maxHeight: 54,
+  },
+  composerAllocationPct: {
+    color: c.text,
+    fontSize: 16,
+    fontWeight: "700",
+    fontFamily: F,
+    fontVariant: ["tabular-nums"],
   },
   composerLegsHeaderRight: {
     flexDirection: "row",
     alignItems: "center",
     gap: 10,
-  },
-  composerAssetHeaderAction: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 999,
-    backgroundColor: c.surfaceAlt,
-  },
-  composerAssetHeaderActionLabel: {
-    color: c.text,
-    fontSize: 11,
-    fontWeight: "900",
-    fontFamily: F,
-    textTransform: "lowercase",
   },
   composerAssetChoices: {
     flexDirection: "row",
@@ -10552,17 +10228,16 @@ const makeStyles = (c: ThemeColors) => {
   },
   composerEvenSplitBtn: {
     flexDirection: "row",
+    gap: 5,
     alignItems: "center",
-    gap: 4,
-    paddingHorizontal: 9,
-    paddingVertical: 4,
-    borderRadius: 12,
-    backgroundColor: wash("#0834F4", "#E8EDFF"),
+    justifyContent: "center",
+    paddingVertical: 6,
   },
   composerEvenSplitLabel: {
-    color: ink("#0834F4", "#7c93ff"),
-    fontSize: 11,
-    fontWeight: "900",
+    color: c.textSecondary,
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: "500",
     fontFamily: F,
   },
   previewSummaryBubble: {
@@ -10730,11 +10405,11 @@ const makeStyles = (c: ThemeColors) => {
     backgroundColor: c.background,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: c.surfaceAlt,
+    borderColor: c.border,
     paddingHorizontal: 12,
     paddingVertical: 10,
-    gap: 7,
-    marginBottom: 7,
+    gap: 4,
+    marginBottom: 8,
   },
   composerLegHead: {
     flexDirection: "row",
@@ -10773,107 +10448,16 @@ const makeStyles = (c: ThemeColors) => {
     fontWeight: "700",
     fontFamily: F,
   },
-  composerSideChip: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 3,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 999,
-    backgroundColor: c.text,
-  },
-  composerSideChipActive: {
-    backgroundColor: c.text,
-  },
-  composerSideLabel: {
-    color: c.background,
-    fontSize: 11,
-    fontWeight: "900",
-    letterSpacing: 0.4,
-    fontFamily: F,
-  },
-  composerSideLong: {
-    backgroundColor: "#1f9d6b",
-  },
-  composerSideShort: {
-    backgroundColor: "#EB1C40",
-  },
-  composerSideYes: {
-    backgroundColor: "#1d6cd6",
-  },
-  composerSideNo: {
-    backgroundColor: "#7d3ad6",
-  },
   composerLegRemove: {
     width: 28,
     height: 28,
     alignItems: "center",
     justifyContent: "center",
   },
-  composerSliderOuter: {
-    gap: 3,
-  },
-  // 28pt tall row that contains both the thin track and the taller thumb.
-  // onLayout is applied here so trackWidth matches what e.x measures.
-  composerSliderTrackRow: {
-    height: 28,
-    justifyContent: "center",
-  },
-  composerNativeSliderHost: {
-    width: "100%",
-    height: 28,
-  },
-  composerSliderTrack: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: c.border,
-    overflow: "hidden",
-  },
-  composerSliderFill: {
-    position: "absolute",
-    left: 0,
-    top: 0,
-    bottom: 0,
-    borderRadius: 4,
-  },
-  composerSliderThumb: {
-    position: "absolute",
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    // vertically centered within the 28pt row: (28 - 24) / 2 = 2
-    top: 2,
-    borderWidth: 2.5,
-    borderColor: "rgba(255,255,255,0.8)",
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.45,
-    shadowRadius: 5,
-    elevation: 6,
-  },
-  composerSliderMeta: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    paddingHorizontal: 2,
-  },
-  composerSliderLabel: {
-    fontSize: 14,
-    fontWeight: "900",
-    fontFamily: F,
-    minWidth: 44,
-  },
-  composerSliderHint: {
-    fontSize: 11,
-    fontWeight: "600",
-    color: c.textTertiary,
-    fontFamily: F,
-  },
   composerAddLeg: {
-    marginTop: 6,
-    marginBottom: 18,
+    marginTop: 2,
+    marginBottom: 4,
+    minHeight: 44,
     alignSelf: "stretch",
     flexDirection: "row",
     alignItems: "center",
@@ -10881,18 +10465,13 @@ const makeStyles = (c: ThemeColors) => {
     gap: 6,
     paddingVertical: 12,
     borderRadius: 14,
-    borderWidth: 1,
-    borderColor: c.text,
-    borderStyle: "dashed",
     backgroundColor: c.background,
-    opacity: 0.6,
   },
   composerAddLegLabel: {
-    color: c.text,
+    color: c.textSecondary,
     fontSize: 14,
-    fontWeight: "900",
+    fontWeight: "600",
     fontFamily: F,
-    textTransform: "lowercase",
   },
   composerSearchWrap: {
     flexDirection: "row",
@@ -11489,30 +11068,6 @@ const makeStyles = (c: ThemeColors) => {
     // Deliberately light: the pad above it is glass, and a heavier dim would
     // leave the material nothing worth refracting.
     backgroundColor: "rgba(15, 23, 42, 0.10)",
-  },
-  buySheetOverlay: {
-    // Anchored to the bottom (no `top`) and given a fixed 82%-of-screen height so
-    // it reads as a tall sheet — the amount entry + thesis sit centered in the
-    // upper flex slot (TradeAmountPad), with the dialpad + Buy pinned to the
-    // bottom — rather than a short content-height drawer.
-    position: "absolute",
-    left: 0,
-    right: 0,
-    bottom: 0,
-    height: "82%",
-    zIndex: 30,
-    paddingHorizontal: 16,
-    paddingBottom: 28,
-    // Opaque, pinned light — the pad's own palette is hardcoded light, and
-    // the page underneath is dimmed by the backdrop, not seen through.
-    backgroundColor: tradeSheetBg(c),
-    borderTopLeftRadius: 22,
-    borderTopRightRadius: 22,
-    shadowColor: c.text,
-    shadowOffset: { width: 0, height: -8 },
-    shadowOpacity: 0.08,
-    shadowRadius: 18,
-    elevation: 12,
   },
   legCardBackdrop: {
     // The blur supplies the separation; retain only a very light tint so the

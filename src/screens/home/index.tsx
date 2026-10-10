@@ -1,9 +1,8 @@
-import { usePrivy } from "@privy-io/expo";
 import { useFocusEffect } from "@react-navigation/native";
 import { useRouter } from "expo-router";
 import * as Haptics from "expo-haptics";
 import { setStatusBarStyle } from "expo-status-bar";
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useState } from "react";
 import {
   RefreshControl,
   StyleSheet,
@@ -28,15 +27,16 @@ import Animated, {
 } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { ComposeFab } from "@/components/compose-fab";
+import { useComposeAction } from "@/components/compose-fab";
 import { CrtTexture } from "@/components/home/crt-texture";
-import { SandwichCategories } from "@/components/home/sandwich-categories";
+import { BestCallsSection } from "@/components/home/best-calls-section";
 import { TICKER_HEIGHT, TickerTape } from "@/components/home/ticker-tape";
 import { BottomTabInset, Fonts, type ThemeColors } from "@/constants/theme";
 import { useThemedStyles } from "@/hooks/use-themed-styles";
-import { appUserPayloadFromPrivyUser } from "@/lib/api";
+import type { Sandwich } from "@/lib/api";
 import { withAlpha } from "@/lib/color-utils";
 import { useSandwichComposer } from "@/lib/sandwich-composer-store";
+import { useSandwichDetail } from "@/lib/sandwich-detail-store";
 import { useStockDetail } from "@/lib/stock-detail-store";
 import { useThemeStore } from "@/lib/theme-store";
 
@@ -44,38 +44,38 @@ import { AddCashButton } from "./add-cash-button";
 import { HeaderPalette, SHEET_RADIUS } from "./header-palette";
 import { formatUsd } from "./helpers";
 import { PortfolioHero } from "./portfolio-hero";
-import { useHomeFeed } from "./use-home-feed";
+import { useHomeCalls } from "./use-home-calls";
 import { useHomeMovers } from "./use-home-movers";
 import { useHomePortfolio } from "./use-home-portfolio";
-import { useHomeSaved } from "./use-home-saved";
 
 /**
  * Home is a dark header board — balance, action, ticker — with the content
  * riding up over it on a rounded sheet.
  *
  * The data behind each region lives in its own hook (`use-home-portfolio`,
- * `use-home-feed`, `use-home-movers`), so this file is layout and sheet
+ * `use-home-calls`, `use-home-movers`), so this file is layout and sheet
  * wiring only.
  */
 export function HomeScreen() {
   const styles = useThemedStyles(makeStyles);
   const { scheme } = useThemeStore();
-  const { user } = usePrivy();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const composer = useSandwichComposer();
-  // Same spot as the Sandwich feed's: just above the native tab bar.
+  // The "+" itself lives in the tabs layout (shared with the Sandwich feed).
   const openComposer = useCallback(() => {
-    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     composer.open();
   }, [composer]);
+  useComposeAction("home", openComposer);
   const { width } = useWindowDimensions();
-  const viewerPayload = useMemo(() => appUserPayloadFromPrivyUser(user), [user]);
-  const viewerPrivyUserId = viewerPayload?.privyUserId ?? null;
 
   const portfolio = useHomePortfolio();
-  const feed = useHomeFeed(viewerPrivyUserId);
-  const saved = useHomeSaved(viewerPrivyUserId);
+  const calls = useHomeCalls();
+  const sandwichDetail = useSandwichDetail();
+  const openSandwich = useCallback((sandwich: Sandwich) => {
+    void Haptics.selectionAsync();
+    sandwichDetail.open(sandwich);
+  }, [sandwichDetail]);
   const movers = useHomeMovers();
   const refreshMovers = movers.refresh;
   const { open: openStock } = useStockDetail();
@@ -157,14 +157,13 @@ export function HomeScreen() {
     try {
       await Promise.allSettled([
         portfolio.refresh(),
-        feed.refresh(),
-        saved.refresh(),
+        calls.refresh(),
         refreshMovers(),
       ]);
     } finally {
       setRefreshing(false);
     }
-  }, [feed, portfolio, refreshMovers, saved]);
+  }, [calls, portfolio, refreshMovers]);
 
   return (
     <View style={styles.page}>
@@ -238,17 +237,15 @@ export function HomeScreen() {
         {/* Everything below the fold lives on the sheet, which laps up over the
             board's bottom edge. */}
         <View style={styles.sheet}>
-          <SandwichCategories
-            posts={feed.posts}
-            loading={feed.loading}
-            failed={feed.failed}
-            saved={saved}
-            onSelect={feed.open}
-            onToggleLike={feed.toggleLike}
-            onComment={feed.openComments}
-            onSeeAll={() => router.push("/(app)/(tabs)/sandwich")}
-            onSeeAllSaved={() => router.push("/(app)/(tabs)/saved")}
-            onRetry={feed.reload}
+          {/* Home's feed is every call ranked by PnL — podcast moments, X
+              posts, any asset. */}
+          <BestCallsSection
+            posts={calls.posts}
+            loading={calls.loading}
+            loadingMore={calls.loadingMore}
+            failed={calls.failed}
+            onSelect={openSandwich}
+            onRetry={() => void calls.refresh()}
           />
         </View>
       </Animated.ScrollView>
@@ -336,11 +333,6 @@ export function HomeScreen() {
         />
       </Animated.View>
 
-      <ComposeFab
-        onPress={openComposer}
-        bottom={88 + Math.max(insets.bottom, 10)}
-        right={16 + Math.max(insets.right, 0)}
-      />
     </View>
   );
 }

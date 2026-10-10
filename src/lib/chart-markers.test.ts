@@ -10,13 +10,28 @@ const series = [
 const points = [{ x: 10, y: 80 }, { x: 100, y: 60 }, { x: 190, y: 40 }];
 
 describe('positionChartMarkers', () => {
-  it('uses the nearest chart point for an entry or exit', () => {
+  it('sits on the nearest chart point for an entry or exit', () => {
     const [marker] = positionChartMarkers([
       { id: 'exit', side: 'exit', occurredAt: '2026-01-02T02:00:00.000Z' },
     ], series, points, 200, 100);
 
-    expect(marker.x).toBe(89);
-    expect(marker.y).toBe(50);
+    expect(marker.x).toBe(100);
+    expect(marker.y).toBe(60);
+  });
+
+  it('snaps a fill from before the first candle onto the start of the line', () => {
+    const [marker] = positionChartMarkers([
+      { id: 'early', side: 'entry', occurredAt: '2025-12-31T12:00:00.000Z' },
+    ], series, points, 200, 100);
+
+    expect(marker.x).toBe(10);
+    expect(marker.y).toBe(80);
+  });
+
+  it('drops a fill from before a zoomed window instead of clamping it to the edge', () => {
+    expect(positionChartMarkers([
+      { id: 'old', side: 'entry', occurredAt: '2025-12-01T00:00:00.000Z' },
+    ], series, points, 200, 100, Date.parse('2026-01-01T00:00:00.000Z'))).toEqual([]);
   });
 
   it('fans clustered fills into distinct bounded positions', () => {

@@ -32,7 +32,6 @@ import { BlurBackdrop } from "@/components/blur-backdrop";
 import { BalanceCardStack } from "@/components/balance-card-stack";
 import { LikeToBuyCard } from "@/components/like-to-buy-card";
 import { DepositSheet, type DepositSheetRef } from "@/components/deposit-sheet";
-import { WithdrawSheet, type WithdrawSheetRef } from "@/components/withdraw-sheet";
 import { HandleText } from "@/components/handle-text";
 import { useCash } from "@/hooks/use-cash";
 import { useWalletStore } from "@/lib/wallet-store";
@@ -137,7 +136,6 @@ export function AutoBuyScreen({ showBackButton = true }: { showBackButton?: bool
   const walletStore = useWalletStore();
   const cash = useCash();
   const depositSheetRef = useRef<DepositSheetRef>(null);
-  const withdrawSheetRef = useRef<WithdrawSheetRef>(null);
   // TEE wallets: server-side access is granted via session signers, not the
   // on-device delegateWallet (which Privy rejects for TEE execution).
   const { addSigners, removeSigners } = useSigners();
@@ -196,8 +194,8 @@ export function AutoBuyScreen({ showBackButton = true }: { showBackButton?: bool
 
   const openWithdraw = useCallback(() => {
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    withdrawSheetRef.current?.open();
-  }, []);
+    router.navigate("/withdraw");
+  }, [router]);
 
   const openLikeToBuy = useCallback(() => {
     void Haptics.selectionAsync();
@@ -702,7 +700,6 @@ export function AutoBuyScreen({ showBackButton = true }: { showBackButton?: bool
         walletAddress={walletStore.walletAddress}
         onCheckout={async () => {}}
       />
-      <WithdrawSheet ref={withdrawSheetRef} />
 
       {/* Like to Buy settings live in a drawer on the wallet tab. */}
       <SheetModal

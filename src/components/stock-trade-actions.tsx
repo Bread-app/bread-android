@@ -1,29 +1,19 @@
 import { useEmbeddedSolanaWallet } from '@privy-io/expo';
-import * as Haptics from 'expo-haptics';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Buffer } from 'buffer';
-import { Platform, StyleSheet, Text, View } from 'react-native';
-import { GlassView, isGlassEffectAPIAvailable } from 'expo-glass-effect';
+import { StyleSheet, View } from 'react-native';
 import { Transaction, VersionedTransaction } from '@solana/web3.js';
 
 import { CTA } from '@/lib/screen-corners';
 import { useThemeStore } from '@/lib/theme-store';
-import { withAlpha } from '@/lib/color-utils';
-import {
-  CTA_BUTTON_HEIGHT,
-  CTA_LABEL_FONT,
-  CTA_LABEL_SIZE,
-  CtaGlassFill,
-  ctaGlassTint,
-  CTA_GLASS_SCALE,
-  CTA_SOLID_SCALE,
-} from '@/components/side-glass-button';
+import { CtaButton } from '@/components/side-glass-button';
 
 import {
   createAtomicBuyTransaction,
   createAtomicSellTransaction,
   createJupiterOrder,
   executeJupiterOrder,
+  getMarkPricesForMints,
   getOnchainTokenBalance,
   getTokenTradeDetail,
   humanizeErrorMessage,
@@ -57,7 +47,8 @@ import {
 import { collectSellCandidateMints, normalizeTicker } from '@/lib/sell-mint';
 import { standaloneHolding, useSandwichLegReserve } from '@/lib/standalone-holding';
 import { useWalletStore } from '@/lib/wallet-store';
-import { PressableScale } from '@/components/pressable-scale';
+import { demoBuySpot, demoSellSpot } from '@/lib/demo-account';
+import { DEMO_BUY_DELAY_MS, useDemoBuyMode } from '@/lib/demo-buy-mode';
 import { maxBuyAmount } from '@/lib/max-buy';
 
 type StockTradeActionsProps = {
@@ -89,7 +80,7 @@ type StockTradeActionsProps = {
 // fill). Older OSes fall back to the solid green gradient.
 // Brand green (theme `accent`) used to tint the Liquid Glass BUY pill — full
 // opacity so the glass keeps its natural green look without washing out.
-const HAS_GLASS = Platform.OS === 'ios' && isGlassEffectAPIAvailable();
+
 
 function getErrorMessage(error: unknown): string {
   return humanizeErrorMessage(error, 'Trade request failed. Please try again.');
@@ -407,6 +398,10 @@ export function useTradeEngine(stockMint: string | null, stockSymbol?: string | 
   const [side, setSide] = useState<'buy' | 'sell'>('buy');
   const [message, setMessage] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  // Settings → Demo buys: trades fill against the on-device paper account
+  // (lib/demo-account.ts) — nothing is built, signed or sent.
+  const [demoBuyMode] = useDemoBuyMode();
+  const demoTrade = demoBuyMode;
   // The mint a sell will actually spend + its exact on-chain size, read straight
   // from the chain (see the effect below). Backstops the walletStore-based
   // matching AND redirects execution to a held variant of the same ticker.
@@ -902,7 +897,7 @@ export function useTradeEngine(stockMint: string | null, stockSymbol?: string | 
   const buyPrebuildBlockedRef = useRef(false);
 
   function prebuildAtomicBuy(): void {
-    if (side !== 'buy' || submitting) return;
+    if (side !== 'buy' || submitting || demoTrade) return;
     if (!walletAddress || !hasValidMint(tradeMint)) return;
 
     const smallest = toSmallestUnits(amount, 6);
@@ -943,7 +938,7 @@ export function useTradeEngine(stockMint: string | null, stockSymbol?: string | 
   // amount so the tap reuses it even for "Max", where the clamp shaves a few raw
   // units off the displayed balance.
   function prebuildAtomicSell(): void {
-    if (side !== 'sell' || submitting) return;
+    if (side !== 'sell' || submitting || demoTrade) return;
     if (!walletAddress || !hasValidMint(sellMint) || !hasValidMint(sellTradeMint)) return;
     if (!sellSizingPrice || sellSizingPrice <= 0) return;
 
@@ -1313,6 +1308,47 @@ export function useTradeEngine(stockMint: string | null, stockSymbol?: string | 
       options?.onBuyStarted?.(tradeCtx);
       setSubmitting(true);
       setMessage(null);
+    }
+
+    // Demo trades: everything above has validated and sized the trade exactly
+    // as for a real one (a sell even clamped to the demo balance). Instead of a
+    // transaction, the fill is booked against the paper account at the live
+    // price, so Holdings, cash and PnL move the way a real trade moves them.
+    if (demoTrade) {
+      try {
+        await new Promise((resolve) => setTimeout(resolve, DEMO_BUY_DELAY_MS));
+        const marks = await getMarkPricesForMints([bookkeepingMint]);
+        const fillPrice = marks[bookkeepingMint] ?? currentPrice;
+        if (!fillPrice || fillPrice <= 0) throw new Error('Price unavailable, try again in a moment.');
+        if (side === 'buy') {
+          await demoBuySpot({
+            mint: bookkeepingMint,
+            usd: usdNotional,
+            priceUsd: fillPrice,
+            decimals: stockDecimals,
+          });
+          options?.onBuySuccess?.(tradeCtx);
+        } else {
+          const sold = await demoSellSpot({ mint: bookkeepingMint, qty: stockQtyInput, priceUsd: fillPrice });
+          options?.onSellSuccess?.({
+            ...tradeCtx,
+            amount: formatCashAmount(sold.proceedsUsd),
+            proceedsUsd: sold.proceedsUsd,
+            realizedPnlUsd: sold.realizedPnlUsd,
+            realizedPnlPct: sold.realizedPnlPct,
+          });
+        }
+        setAmount('');
+        options?.onAfterSubmit?.();
+        options?.onSuccess?.(tradeCtx);
+        void walletStore.refresh();
+        void walletStore.reloadCostBasis();
+      } catch (error) {
+        toast.showToast(getErrorMessage(error), 'error');
+      } finally {
+        setSubmitting(false);
+      }
+      return;
     }
 
     try {
@@ -1693,11 +1729,17 @@ export function useTradeEngine(stockMint: string | null, stockSymbol?: string | 
   // with cash should land on BUY so small affordable buys aren't blocked.
   const needsCash =
     side === 'buy' &&
+    // Demo cash can't be topped up; the account is reset from Settings instead.
+    !demoTrade &&
     !cash.loading &&
     !!options?.onRequestAddCash &&
     (insufficientBalance || (!hasNumericAmount && cash.totalCash <= 0));
 
-  const confirmLabel = needsCash ? 'Add cash' : undefined;
+  const confirmLabel = needsCash
+    ? 'Add cash'
+    : demoTrade
+      ? side === 'buy' ? 'Demo buy' : 'Demo sell'
+      : undefined;
 
   // A closed US session is a fact about the venue, not a transient miss: the
   // RFQ makers behind these wrappers will not quote again until the opening
@@ -1719,7 +1761,7 @@ export function useTradeEngine(stockMint: string | null, stockSymbol?: string | 
       (side === 'sell' ? sellReady : hasValidMint(tradeMint)) &&
       !submitting &&
       !insufficientBalance &&
-      !blockedByClosedMarket &&
+      (demoTrade || !blockedByClosedMarket) &&
       hasNumericAmount);
 
   /**
@@ -1823,161 +1865,37 @@ export function StockTradeActions({
   onAddCash,
   disableGlass = false,
 }: StockTradeActionsProps) {
-  const { colors, scheme } = useThemeStore();
-  const isDark = scheme === 'dark';
+  const { colors } = useThemeStore();
   const cash = useCash();
-  // Replace BUY with "Add cash" when the user can't cover a buy — but only when a
-  // deposit flow is wired in (otherwise the button would do nothing) and the
-  // balance has actually resolved (so we don't flash Add cash on a loading 0).
-  // Entry "Buy" button: only becomes "Add cash" for a genuinely empty wallet, so
-  // any user with spendable cash can open the buy sheet and size their order.
   const showAddCash = !!onAddCash && !cash.loading && cash.totalCash <= 0;
-  const useGlass = HAS_GLASS && !disableGlass;
+  const primary = (
+    <CtaButton
+      label={showAddCash ? 'Add cash' : 'Buy'}
+      color={showAddCash ? colors.actionPrimary : colors.actionBuy}
+      onPress={() => showAddCash ? onAddCash?.() : onTrade?.('buy')}
+      glass={disableGlass ? false : undefined}
+      style={hasPosition ? styles.halfButton : undefined}
+    />
+  );
 
-  const buyGlassStyle = {
-    backgroundColor: withAlpha(colors.actionBuy, isDark ? 0.3 : 0.04),
-    borderColor: withAlpha(colors.actionBuy, isDark ? 0.65 : 0.15),
-    borderWidth: 1,
-  };
-
-  const sellGlassStyle = {
-    backgroundColor: withAlpha(colors.actionSell, isDark ? 0.3 : 0.04),
-    borderColor: withAlpha(colors.actionSell, isDark ? 0.65 : 0.15),
-    borderWidth: 1,
-  };
-
-  const addCashGlassStyle = {
-    backgroundColor: withAlpha(colors.actionPrimary, isDark ? 0.08 : 0.05),
-    borderColor: withAlpha(colors.actionPrimary, isDark ? 0.3 : 0.15),
-    borderWidth: 1,
-  };
-
-  const buyTextStyle = [
-    styles.buyButtonText,
-    {
-      textShadowColor: withAlpha(colors.actionBuy, 0.4),
-      textShadowOffset: { width: 0, height: 0 },
-      textShadowRadius: 6,
-    },
-  ];
-
-  const sellTextStyle = [
-    styles.buyButtonText,
-    {
-      textShadowColor: withAlpha(colors.actionSell, 0.4),
-      textShadowOffset: { width: 0, height: 0 },
-      textShadowRadius: 6,
-    },
-  ];
-
-  const addCashTextStyle = [
-    styles.buyButtonText,
-    {
-      textShadowColor: withAlpha(colors.actionPrimary, 0.4),
-      textShadowOffset: { width: 0, height: 0 },
-      textShadowRadius: 6,
-    },
-  ];
-
-  // Primary action — either BUY or, when the balance is too low, Add cash. Same
-  // shell/size either way; `shellStyle` controls full-width vs half (with SELL).
-  const renderPrimary = (shellStyle: object) =>
-    showAddCash ? (
-      <PressableScale
-        accessibilityRole="button"
-        accessibilityLabel="Add cash"
-        onPress={() => {
-          void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-          onAddCash?.();
-        }}
-        scaleTo={useGlass ? CTA_GLASS_SCALE : CTA_SOLID_SCALE}
-        style={[styles.buttonShell, shellStyle]}>
-        {useGlass ? (
-          <GlassView
-            glassEffectStyle="clear"
-            isInteractive
-            tintColor={isDark ? withAlpha(colors.actionPrimary, 0.25) : colors.actionPrimary}
-            colorScheme={isDark ? 'dark' : 'light'}
-            style={[styles.buttonFill, addCashGlassStyle]}>
-            <CtaGlassFill color={colors.actionPrimary} isDark={isDark} />
-            <Text style={addCashTextStyle}>Add cash</Text>
-          </GlassView>
-        ) : (
-          <View style={[styles.buttonFill, { overflow: 'hidden' }]}>
-            <CtaGlassFill color={colors.actionPrimary} isDark={isDark} glass={false} />
-            <Text style={styles.buyButtonText}>Add cash</Text>
-          </View>
-        )}
-      </PressableScale>
-    ) : (
-      <PressableScale
-        accessibilityRole="button"
-        accessibilityLabel="Buy"
-        onPress={() => {
-          void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-          onTrade?.('buy');
-        }}
-        scaleTo={useGlass ? CTA_GLASS_SCALE : CTA_SOLID_SCALE}
-        style={[styles.buttonShell, shellStyle]}>
-        {useGlass ? (
-          <GlassView
-            glassEffectStyle="clear"
-            isInteractive
-            tintColor={ctaGlassTint(colors.actionBuy, isDark)}
-            colorScheme={isDark ? 'dark' : 'light'}
-            style={[styles.buttonFill, buyGlassStyle]}>
-            <CtaGlassFill color={colors.actionBuy} isDark={isDark} />
-            <Text style={buyTextStyle}>BUY</Text>
-          </GlassView>
-        ) : (
-          <View style={[styles.buttonFill, { overflow: 'hidden' }]}>
-            <CtaGlassFill color={colors.actionBuy} isDark={isDark} glass={false} />
-            <Text style={styles.buyButtonText}>BUY</Text>
-          </View>
-        )}
-      </PressableScale>
-    );
-
-  if (hasPosition) {
-    return (
-      <View style={[styles.container, styles.row]}>
-        {renderPrimary(styles.halfButtonShell)}
-
-        <PressableScale
-          onPress={() => {
-            void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-            onTrade?.('sell');
-          }}
-          scaleTo={useGlass ? CTA_GLASS_SCALE : CTA_SOLID_SCALE}
-        style={[styles.buttonShell, styles.halfButtonShell]}>
-          {useGlass ? (
-            <GlassView
-              glassEffectStyle="clear"
-              isInteractive
-              tintColor={ctaGlassTint(colors.actionSell, isDark)}
-              colorScheme={isDark ? 'dark' : 'light'}
-              style={[styles.buttonFill, sellGlassStyle]}>
-              <CtaGlassFill color={colors.actionSell} isDark={isDark} />
-              <Text style={sellTextStyle}>SELL</Text>
-            </GlassView>
-          ) : (
-            <View style={[styles.buttonFill, { overflow: 'hidden' }]}>
-              <CtaGlassFill color={colors.actionSell} isDark={isDark} glass={false} />
-              <Text style={styles.buyButtonText}>SELL</Text>
-            </View>
-          )}
-        </PressableScale>
-      </View>
-    );
-  }
-
-  return <View style={styles.container}>{renderPrimary(styles.buyShell)}</View>;
+  return (
+    <View style={[styles.container, hasPosition && styles.row]}>
+      {primary}
+      {hasPosition ? (
+        <CtaButton
+          label="Sell"
+          color={colors.actionSell}
+          onPress={() => onTrade?.('sell')}
+          glass={disableGlass ? false : undefined}
+          style={styles.halfButton}
+        />
+      ) : null}
+    </View>
+  );
 }
 
 const styles = StyleSheet.create({
   container: {
-    // The row owns its distance from the screen edge (its hosts pin it flush)
-    // so the corners below can be cut to match the display's.
     paddingHorizontal: CTA.inset,
     paddingVertical: 2,
   },
@@ -1985,28 +1903,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 12,
   },
-  // Pressable shell owns sizing + rounding (with overflow:hidden so the glass /
-  // gradient fill is clipped to the rounded corners); the inner GlassView or
-  // LinearGradient paints the fill.
-  buttonShell: {
-    borderRadius: CTA.radius,
-    overflow: 'hidden',
-  },
-  buyShell: {
-    alignSelf: 'stretch',
-  },
-  halfButtonShell: {
+  halfButton: {
     flex: 1,
-  },
-  buttonFill: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    height: CTA_BUTTON_HEIGHT,
-  },
-  buyButtonText: {
-    color: '#ffffff',
-    fontSize: CTA_LABEL_SIZE,
-    fontFamily: CTA_LABEL_FONT,
-    letterSpacing: 1,
   },
 });

@@ -1,5 +1,7 @@
-import React from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import React, { useState } from 'react';
+import { StyleSheet, Text, View, type LayoutChangeEvent } from 'react-native';
+
+import { MorphText, parseLabelNumber, useRollDirection } from '@/components/morph-text';
 
 import { ValueSkeleton } from '@/components/value-skeleton';
 import { Fonts, Radius, type ThemeColors } from '@/constants/theme';
@@ -23,6 +25,14 @@ const SANS = Fonts.sans;
  */
 const VALUE_SHADOW = 'rgba(0, 0, 0, 0.20)';
 const PNL_SHADOW = 'rgba(0, 0, 0, 0.22)';
+
+/** onLayout → width setter that ignores sub-point jitter. */
+function measure(set: React.Dispatch<React.SetStateAction<number>>) {
+  return (event: LayoutChangeEvent) => {
+    const width = event.nativeEvent.layout.width;
+    set((current) => (Math.abs(current - width) < 0.5 ? current : width));
+  };
+}
 
 type Props = {
   /** True once both the balance read and the history read can be trusted. */
@@ -65,6 +75,10 @@ export function PortfolioHero({
       }).format(Math.abs(changeUsd))}`;
 
   const changeTone = positive ? BoardTone.up : BoardTone.down;
+  const valueDirection = useRollDirection(ready ? parseLabelNumber(valueLabel) : null);
+  const changeDirection = useRollDirection(ready ? changeUsd : null);
+  const [valueWidth, setValueWidth] = useState(0);
+  const [changeWidth, setChangeWidth] = useState(0);
 
   return (
     <View style={styles.section}>
@@ -76,17 +90,22 @@ export function PortfolioHero({
           right edge. The P&L sits on its own line beneath. */}
       <View style={styles.valueRow}>
         {ready ? (
-          <Text
-            // Nothing on screen names this number, so the label has to carry
-            // the context for screen readers.
-            accessibilityLabel={`Portfolio value ${valueLabel}`}
-            adjustsFontSizeToFit
-            minimumFontScale={0.72}
-            numberOfLines={1}
-            style={styles.value}
-          >
-            {valueLabel}
-          </Text>
+          <View style={styles.valueBlock} onLayout={measure(setValueWidth)}>
+            {/* An odometer, not a swap: changed digits roll up when the balance
+                grows and down when it falls; unchanged ones stay put. */}
+            <MorphText
+              mode="digits"
+              direction={valueDirection}
+              text={valueLabel}
+              // Nothing on screen names this number, so the label has to carry
+              // the context for screen readers.
+              accessibilityLabel={`Portfolio value ${valueLabel}`}
+              align="left"
+              maxWidth={valueWidth}
+              minimumScale={0.72}
+              style={styles.value}
+            />
+          </View>
         ) : loadingValue ? (
           <View style={styles.valueBlock}>
             <ValueSkeleton
@@ -104,20 +123,23 @@ export function PortfolioHero({
       </View>
 
       {ready && changeLabel !== null ? (
-        <Text
-          accessibilityLabel={`Your portfolio P and L ${changeLabel}`}
-          adjustsFontSizeToFit
-          minimumFontScale={0.74}
-          numberOfLines={1}
-          style={[
-            styles.change,
-            // The board tones the ticker uses, so "down" is the same pink in
-            // both — they sit inches apart.
-            { color: changeTone },
-          ]}
-        >
-          {changeLabel}
-        </Text>
+        <View style={styles.changeBlock} onLayout={measure(setChangeWidth)}>
+          <MorphText
+            mode="digits"
+            direction={changeDirection}
+            text={changeLabel}
+            accessibilityLabel={`Your portfolio P and L ${changeLabel}`}
+            align="left"
+            maxWidth={changeWidth}
+            minimumScale={0.74}
+            style={[
+              styles.change,
+              // The board tones the ticker uses, so "down" is the same pink in
+              // both — they sit inches apart.
+              { color: changeTone },
+            ]}
+          />
+        </View>
       ) : (
         <ValueSkeleton
           width={84}
@@ -174,8 +196,10 @@ const makeStyles = (_c: ThemeColors) =>
       textShadowRadius: 4,
     },
 
-    change: {
+    changeBlock: {
       marginTop: 2,
+    },
+    change: {
       fontSize: 16,
       lineHeight: 21,
       fontWeight: '800',

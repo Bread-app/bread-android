@@ -55,6 +55,8 @@ import { Fonts, type ThemeColors } from '@/constants/theme';
 import { getSheetColors } from '@/lib/sheet-colors';
 import { withAlpha } from '@/lib/color-utils';
 import { isPaperMode } from '@/lib/paper-mode';
+import { demoOpenPerp } from '@/lib/demo-account';
+import { DEMO_BUY_DELAY_MS, isDemoBuyMode } from '@/lib/demo-buy-mode';
 import {
   clearPhoenixOrderPrebuild,
   prebuildPhoenixOrder,
@@ -732,6 +734,27 @@ const PhoenixMarketDetailSheetContent = forwardRef<
         // run — the pad validated, sized, and priced the order — so the receipt
         // gets the same numbers a live fill would have produced. What it skips
         // is the part that costs money: building, signing, and broadcasting.
+        // Demo buys (Settings): same short-circuit, but the position is booked
+        // against the on-device paper account, so it shows up in Holdings with
+        // live PnL and can be closed — and its margin comes out of demo cash.
+        if (isDemoBuyMode()) {
+          await new Promise((resolve) => setTimeout(resolve, DEMO_BUY_DELAY_MS));
+          const entryPrice = detail?.markPrice ?? null;
+          if (!entryPrice) throw new Error('No mark price for this market right now.');
+          await demoOpenPerp({
+            symbol: market.symbol,
+            name: market.name ?? null,
+            iconUri: receiptLogo.logoUri ?? null,
+            side,
+            leverage,
+            marginUsd: Number(marginUsd),
+            entryPrice,
+          });
+          tradeFx.updatePerp(receiptId, { ...pendingReceipt, entryPrice, loading: false });
+          void Promise.all([loadAccount(), refreshCash()]).catch(() => undefined);
+          closeOrderPad();
+          return;
+        }
         if (isPaperMode()) {
           await new Promise((resolve) => setTimeout(resolve, PAPER_FILL_DELAY_MS));
           tradeFx.updatePerp(receiptId, { ...pendingReceipt, loading: false });

@@ -8,18 +8,17 @@ import React, {
   useCallback,
   useEffect,
   useImperativeHandle,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
   useSyncExternalStore,
 } from 'react';
-import { AppState, ActivityIndicator, Dimensions, Image, Keyboard, Linking, Platform, Pressable, ScrollView, Share, StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
-import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import { AppState, ActivityIndicator, Image, Keyboard, Linking, Platform, Pressable, ScrollView, Share, StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useEmbeddedSolanaWallet, usePrivy } from '@privy-io/expo';
 import Reanimated, {
-  Easing,
   Extrapolation,
   interpolate,
   runOnJS,
@@ -27,8 +26,6 @@ import Reanimated, {
   useAnimatedScrollHandler,
   useAnimatedStyle,
   useSharedValue,
-  withSpring,
-  withTiming,
 } from 'react-native-reanimated';
 import type { SharedValue } from 'react-native-reanimated';
 import { AssetLogo } from '@/components/asset-logo';
@@ -83,11 +80,10 @@ import { equityLogoFallbackUris } from '@/lib/stock-logos';
 import { CandlestickChart, type ChartWindow } from './candlestick-chart';
 import { BuySuccessSheet } from './buy-success-sheet';
 import { LineChart, type LineChartWindow } from './line-chart';
-import { DepositSheet, type DepositSheetRef } from './deposit-sheet';
 import { SandwichCard, type SandwichCardSavedControls } from '@/components/sandwich-card';
 import { StockTradeActions, useTradeEngine, type TradeContext } from './stock-trade-actions';
-import { TradeAmountPad } from './trade-amount-sheet';
-import { GlassSheetSurface } from './glass-sheet-surface';
+import type { TradeAmountPad } from './trade-amount-sheet';
+import { useStockTradeSheet } from '@/lib/stock-trade-sheet-store';
 import { TradeQuotePreviewRow } from './trade-quote-preview';
 import { useCash } from '@/hooks/use-cash';
 import { isPerpOnlyStock } from '@/lib/hyperliquid-perp-market';
@@ -145,19 +141,6 @@ export const MARKET_TOGGLE_TOP = 14;
 /** Right inset of the Spot/Perp toggle. A full-screen host lines its own
  *  chrome up against this edge, so it is shared rather than duplicated. */
 export const MARKET_TOGGLE_RIGHT = 18;
-
-/**
- * The dialpad's own surface colour. See the GlassSheetSurface call below: glass
- * cannot paint under this overlay's opacity animation, so the sheet cannot lean
- * on the material for its fill the way a plain modal can.
- */
-const TRADE_PAD_SURFACE = '#F7F9FC';
-const TRADE_PAD_SURFACE_DARK = '#101312';
-
-/** The buy/sell dialpad's height — the same 90% of the screen the perp ticket uses. */
-const TRADE_SHEET_HEIGHT = Dimensions.get('window').height * 0.9;
-const TRADE_STACK_SCALE = 0.93;
-const TRADE_STACK_PUSH_Y = -38;
 
 const HAS_GLASS = Platform.OS === 'ios' && isGlassEffectAPIAvailable();
 /**
@@ -1243,8 +1226,7 @@ function StockDetailSheet({
   onOpenSandwich,
 }: StockDetailSheetProps, ref) {
   const styles = useThemedStyles(makeStyles);
-  const { colors, scheme } = useThemeStore();
-  const isDark = scheme === 'dark';
+  const { colors } = useThemeStore();
   const sheetColors = getSheetColors(colors);
   const toast = useToast();
   const sheetRef = useRef<BottomSheetModal>(null);
@@ -1311,46 +1293,30 @@ function StockDetailSheet({
       phoenixMarketMatchesAsset(activePerpMarket, stock),
   );
 
-  const tradeSheetIndex = useSharedValue(-1);
-  // Live finger-follow offset while swiping anywhere on the trade card down.
-  const tradeDragY = useSharedValue(0);
-  const tradeTouchStartX = useSharedValue(0);
-  const tradeTouchStartY = useSharedValue(0);
+  const {
+    present: presentTradeSheet,
+    close: closeNativeTradeSheet,
+    openDeposit,
+  } = useStockTradeSheet();
+  const tradeOwner = useRef(Symbol('stock-trade')).current;
   const [tradeSheetOpen, setTradeSheetOpen] = useState(false);
-  const tradeSheetOpenRef = useRef(false);
-  /** Either venue has a ticket raised over the asset — the perp card, or the
-   *  spot dialpad. Only the floating venue toggle reads this: it sits above
-   *  both layers and must not hover over an order in progress. */
   const tradeOverlayOpen = perpOverlayOpen || tradeSheetOpen;
-  const hideTradeSheetImmediately = useCallback(() => {
-    Keyboard.dismiss();
-    tradeSheetIndex.value = -1;
-    setTradeSheetOpen(false);
-  }, [tradeSheetIndex]);
+  const markTradeClosed = useCallback(() => setTradeSheetOpen(false), []);
   const closeTradeSheet = useCallback(() => {
     Keyboard.dismiss();
-    // Gather speed toward the bottom edge, matching the perp ticket's exit.
-    // A new tap can still reverse this immediately with the entry spring.
-    tradeSheetIndex.value = withTiming(
-      -1,
-      { duration: 280, easing: Easing.in(Easing.cubic) },
-      (finished) => {
-        if (finished) {
-          runOnJS(setTradeSheetOpen)(false);
-        }
-      },
-    );
-  }, [tradeSheetIndex]);
-  const depositSheetRef = useRef<DepositSheetRef>(null);
+    setTradeSheetOpen(false);
+    closeNativeTradeSheet(tradeOwner);
+  }, [closeNativeTradeSheet, tradeOwner]);
+  const hideTradeSheetImmediately = closeTradeSheet;
   const perpSheetRef = useRef<PhoenixMarketDetailSheetRef>(null);
   const solanaWallet = useEmbeddedSolanaWallet();
   /** The host draws both action bars itself, outside this surface. */
   const hoistActions = Boolean(embeddedStock) && hideEmbeddedActions;
-  const depositWalletAddress = solanaWallet.wallets?.[0]?.address ?? null;
   const handleAddCash = useCallback(() => {
-    hideTradeSheetImmediately();
-    depositSheetRef.current?.open();
-  }, [hideTradeSheetImmediately]);
+    Keyboard.dismiss();
+    setTradeSheetOpen(false);
+    openDeposit(tradeOwner);
+  }, [openDeposit, tradeOwner]);
   // Tapping a holder hands off to the parent's profile screen. The sheet closes
   // first (embedded hosts own their own surface and shouldn't be dismissed), so
   // the profile isn't opened underneath a stock sheet the user can't see past.
@@ -1793,125 +1759,10 @@ function StockDetailSheet({
     };
   }, [marketMode]);
 
-  const stockContentStyle = useAnimatedStyle(() => {
-    const entryProgress = interpolate(
-      tradeSheetIndex.value,
-      [-1, 0],
-      [0, 1],
-      Extrapolation.CLAMP,
-    );
-    const dragProgress = Math.max(0, 1 - tradeDragY.value / TRADE_SHEET_HEIGHT);
-    const progress = Math.min(entryProgress, dragProgress);
-    const scale = interpolate(progress, [0, 1], [1, TRADE_STACK_SCALE]);
-    const translateY = interpolate(progress, [0, 1], [0, TRADE_STACK_PUSH_Y]);
-    const borderRadius = interpolate(progress, [0, 1], [0, STOCK_SHEET_TOP_RADIUS]);
-    return { borderRadius, transform: [{ scale }, { translateY }] };
-  });
-  const tradeBackdropStyle = useAnimatedStyle(() => {
-    const entryProgress = interpolate(
-      tradeSheetIndex.value,
-      [-1, 0],
-      [0, 1],
-      Extrapolation.CLAMP,
-    );
-    const dragProgress = Math.max(0, 1 - tradeDragY.value / TRADE_SHEET_HEIGHT);
-    return { opacity: Math.min(entryProgress, dragProgress) };
-  });
-  const tradeOverlayStyle = useAnimatedStyle(() => ({
-    transform: [
-      {
-        translateY:
-          interpolate(
-            tradeSheetIndex.value,
-            [-1, 0],
-            [TRADE_SHEET_HEIGHT, 0],
-            Extrapolation.CLAMP,
-          ) +
-          tradeDragY.value,
-      },
-    ],
-  }));
-
   const openTradeSheet = useCallback((tradeSide: 'buy' | 'sell') => {
     tradeEngine.reset(tradeSide);
-    tradeDragY.value = 0;
-    if (tradeSheetOpenRef.current) {
-      // A re-tap during the close reverses the card from its current position.
-      tradeSheetIndex.value = withSpring(0, { damping: 26, stiffness: 300, mass: 1 });
-    } else {
-      // Mount at the bottom edge; the effect below starts the full-height entry
-      // only after React has put the card on screen.
-      tradeSheetIndex.value = -1;
-    }
     setTradeSheetOpen(true);
-  }, [tradeEngine, tradeSheetIndex, tradeDragY]);
-
-  useEffect(() => {
-    const wasOpen = tradeSheetOpenRef.current;
-    tradeSheetOpenRef.current = tradeSheetOpen;
-    if (tradeSheetOpen && !wasOpen) {
-      tradeSheetIndex.value = withSpring(0, { damping: 30, stiffness: 200, mass: 1 });
-    }
-  }, [tradeSheetIndex, tradeSheetOpen]);
-
-  // Swipe-down anywhere on the trade overlay dismisses ONLY the trade overlay,
-  // not the whole stock-detail modal. gorhom's own pan-down-to-close is disabled
-  // while the overlay is open (see the modal props below), so this is the sole
-  // drag-to-dismiss path for the buy/sell sheet.
-  //
-  // Manual activation lets buttons keep taps while still allowing a downward
-  // swipe to begin from the header, amount, keypad gaps, or footer.
-  const tradeDismissPan = useMemo(
-    () =>
-      Gesture.Pan()
-        .manualActivation(true)
-        .onTouchesDown((event) => {
-          'worklet';
-          const touch = event.allTouches[0];
-          if (!touch) return;
-          tradeTouchStartX.value = touch.absoluteX;
-          tradeTouchStartY.value = touch.absoluteY;
-        })
-        .onTouchesMove((event, manager) => {
-          'worklet';
-          const touch = event.allTouches[0];
-          if (!touch) return;
-          const dx = touch.absoluteX - tradeTouchStartX.value;
-          const dy = touch.absoluteY - tradeTouchStartY.value;
-          if (Math.abs(dx) > Math.abs(dy)) {
-            if (Math.abs(dx) > 10) manager.fail();
-            return;
-          }
-          if (dy < 0) {
-            manager.fail();
-            return;
-          }
-          if (dy > 10) manager.activate();
-        })
-        .onUpdate((e) => {
-          'worklet';
-          tradeDragY.value = Math.max(0, e.translationY);
-        })
-        .onEnd((e) => {
-          'worklet';
-          const decel = 0.998;
-          const projected = e.translationY + (e.velocityY / 1000) * (decel / (1 - decel));
-          const shouldDismiss = projected > 160;
-          if (shouldDismiss) {
-            // Let the overlay fade out from where the finger left it; openTradeSheet
-            // resets tradeDragY before the next open.
-            runOnJS(closeTradeSheet)();
-          } else {
-            tradeDragY.value = withSpring(0, {
-              velocity: e.velocityY,
-              damping: 24,
-              stiffness: 260,
-              mass: 1,
-            });
-          }
-        }),
-    [closeTradeSheet, tradeDragY, tradeTouchStartX, tradeTouchStartY],
-  );
+  }, [tradeEngine]);
 
   const snapPoints = useMemo(() => ['92%'], []);
 
@@ -2437,9 +2288,62 @@ function StockDetailSheet({
       selectedPerpMarket,
     ],
   );
+  // Publish the live engine's pad props to the native route. Keeping the
+  // engine here preserves its prebuild cache and post-trade reconciliation.
+  useLayoutEffect(() => {
+    if (!tradeSheetOpen) return;
+    const pad: React.ComponentProps<typeof TradeAmountPad> = {
+      side: tradeEngine.side,
+      symbol: displaySymbol,
+      icon: selectedIcon,
+      subtitleLabel: stock?.mcap != null ? `${formatCompactUSD(stock.mcap)} MC` : null,
+      priceLabel: selectedPrice == null ? null : formatPrice(selectedPrice),
+      priceLoading: selectedPrice == null,
+      changeLabel: formatPercent(selectedChange),
+      changePositive: (selectedChange ?? 0) >= 0,
+      presets: tradeEngine.side === 'sell' ? ['25%', '50%', 'Max'] : ['10', '25', '50', 'Max'],
+      amountUnitSymbol: tradeEngine.amountUnitSymbol,
+      amountUnitLabel: tradeEngine.amountUnitLabel,
+      availableLabel: tradeEngine.availableLabel,
+      amount: tradeEngine.amount,
+      message: tradeEngine.message,
+      submitting: tradeEngine.submitting,
+      canConfirm: tradeEngine.canConfirm,
+      confirmLabel: tradeEngine.confirmLabel,
+      detailRows: tradeEngine.detailRows,
+      slideToConfirm: true,
+      addCash: tradeEngine.needsCash,
+      onSubmit: tradeEngine.onSubmit,
+      onSubmitPressIn: tradeEngine.onSubmitPressIn,
+      onTapDigit: tradeEngine.tapDigit,
+      onTapPreset: tradeEngine.tapPreset,
+      previewContent: (
+        <TradeQuotePreviewRow
+          preview={tradeEngine.quotePreview.preview}
+          loading={tradeEngine.quotePreview.loading}
+          // Value the token actually traded, rather than the scrubbed header price.
+          unitPriceUsd={tradeEngine.unitPriceUsd}
+        />
+      ),
+      noticeText: tradeNotice,
+      noticeActionLabel: showOndoHoursLink ? 'Learn more' : null,
+      onNoticeAction: showOndoHoursLink ? handleOpenOndoHours : undefined,
+      scrollEnabled: false,
+    };
+    presentTradeSheet(tradeOwner, {
+      pad,
+      tweetUrl: notificationTweetUrl ?? null,
+    }, markTradeClosed);
+  }, [
+    tradeSheetOpen, presentTradeSheet, tradeOwner, notificationTweetUrl, markTradeClosed,
+    tradeEngine, displaySymbol, selectedIcon, stock?.mcap, selectedPrice, selectedChange,
+    tradeNotice, showOndoHoursLink, handleOpenOndoHours,
+  ]);
+  useEffect(() => () => closeNativeTradeSheet(tradeOwner), [closeNativeTradeSheet, tradeOwner]);
+
   const spotSheetContents = (
     <View style={styles.stockSheetHost}>
-          <Reanimated.View style={[styles.stockContentLayer, stockContentStyle]}>
+          <Reanimated.View style={styles.stockContentLayer}>
             {!stock ? (
               <DetailScrollView
                 keyboardShouldPersistTaps="handled"
@@ -2744,88 +2648,6 @@ function StockDetailSheet({
             ) : null}
           </Reanimated.View>
 
-          {tradeSheetOpen ? (
-            <>
-              <Reanimated.View style={[styles.tradeSheetBackdrop, tradeBackdropStyle]}>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel="Close trade sheet"
-                  onPress={closeTradeSheet}
-                  style={StyleSheet.absoluteFill}
-                />
-              </Reanimated.View>
-              <Reanimated.View style={[styles.tradeSheetOverlay, tradeOverlayStyle]}>
-                {/* Liquid Glass surface — the chart and the detail sheet stay
-                    visible, refracting, behind the dialpad. Pinned light because
-                    the pad's own palette is hardcoded light. */}
-                <GlassSheetSurface
-                  topRadius={STOCK_SHEET_TOP_RADIUS}
-                  forceScheme={isDark ? 'dark' : 'light'}
-                  // Opaque, unlike the modal pad's 28% scrim: this overlay
-                  // animates its own opacity on open, and a native GlassView
-                  // inside an animated-opacity layer paints nothing — leaving
-                  // the keypad sitting on bare chart and news text, with the
-                  // detail's own header ghosting through the pad's. The scrim
-                  // is the surface here; glass only adds sheen on top.
-                  scrimColor={isDark ? TRADE_PAD_SURFACE_DARK : TRADE_PAD_SURFACE}
-                />
-                <GestureDetector gesture={tradeDismissPan}>
-                  <View style={styles.tradeSheetDragArea}>
-                    <View style={styles.tradeSheetHandleHit}>
-                      <View style={styles.tradeSheetHandle} />
-                    </View>
-                    {notificationTweetUrl ? <NotificationTweet url={notificationTweetUrl} compact /> : null}
-                    <TradeAmountPad
-                  side={tradeEngine.side}
-                  symbol={displaySymbol}
-                  icon={selectedIcon}
-                  subtitleLabel={stock?.mcap != null ? `${formatCompactUSD(stock.mcap)} MC` : null}
-                  priceLabel={selectedPrice == null ? null : formatPrice(selectedPrice)}
-                  priceLoading={selectedPrice == null}
-                  changeLabel={formatPercent(selectedChange)}
-                  changePositive={(selectedChange ?? 0) >= 0}
-                  presets={tradeEngine.side === 'sell' ? ['25%', '50%', 'Max'] : ['10', '25', '50', 'Max']}
-                  amountUnitSymbol={tradeEngine.amountUnitSymbol}
-                  amountUnitLabel={tradeEngine.amountUnitLabel}
-                  availableLabel={tradeEngine.availableLabel}
-                  amount={tradeEngine.amount}
-                  message={tradeEngine.message}
-                  submitting={tradeEngine.submitting}
-                  canConfirm={tradeEngine.canConfirm}
-                  confirmLabel={tradeEngine.confirmLabel}
-                  detailRows={tradeEngine.detailRows}
-                  slideToConfirm
-                  addCash={tradeEngine.needsCash}
-                  onSubmit={tradeEngine.onSubmit}
-                  onSubmitPressIn={tradeEngine.onSubmitPressIn}
-                  onTapDigit={tradeEngine.tapDigit}
-                  onTapPreset={tradeEngine.tapPreset}
-                  previewContent={
-                    <TradeQuotePreviewRow
-                      preview={tradeEngine.quotePreview.preview}
-                      loading={tradeEngine.quotePreview.loading}
-                      // The price of the token the trade actually moves, NOT the
-                      // header's. The header shows the listed share and follows
-                      // the chart scrub, so valuing a fill with it reported the
-                      // wrapper-vs-share gap (and any scrubbed历 price) as if it
-                      // were profit — a $5 buy printed "≈ $5.18" — and moved
-                      // with the scrub while the user dragged the chart.
-                      unitPriceUsd={tradeEngine.unitPriceUsd}
-                    />
-                  }
-                  noticeText={tradeNotice}
-                  noticeActionLabel={showOndoHoursLink ? 'Learn more' : null}
-                  onNoticeAction={showOndoHoursLink ? handleOpenOndoHours : undefined}
-                  // Keep the amount/header area fixed — the flex layout already
-                  // sizes it to fit, so scrolling only lets the center drift/bounce
-                  // when tapped. See [[bottom-sheet-present-pattern]].
-                  scrollEnabled={false}
-                    />
-                  </View>
-                </GestureDetector>
-              </Reanimated.View>
-            </>
-          ) : null}
     </View>
   );
 
@@ -3031,11 +2853,6 @@ function StockDetailSheet({
           {sheetContents}
         </SheetModal>
       )}
-      <DepositSheet
-        ref={depositSheetRef}
-        walletAddress={depositWalletAddress}
-        onCheckout={async () => {}}
-      />
       <BuySuccessSheet
         visible={buySuccess.visible}
         loading={buySuccess.loading}
@@ -3407,58 +3224,6 @@ const makeStyles = (c: ThemeColors) => {
       paddingTop: 10,
       paddingBottom: CTA.inset,
       backgroundColor: sheetColors.background,
-    },
-    tradeSheetBackdrop: {
-      ...StyleSheet.absoluteFillObject,
-      zIndex: 20,
-      // Deliberately light: the pad above it is glass, and a heavier dim would
-      // leave the material nothing worth refracting.
-      backgroundColor: 'rgba(15, 23, 42, 0.10)',
-    },
-    // A card, not a full-screen cover: anchored to the bottom at 90% of the
-    // screen so the asset stays visible above it and the glass has an edge. Left
-    // full-height, the pad spread its header, presets and keypad across the whole
-    // display with the detail bleeding through the translucent surface between them.
-    tradeSheetOverlay: {
-      position: 'absolute',
-      left: 0,
-      right: 0,
-      bottom: 0,
-      height: TRADE_SHEET_HEIGHT,
-      zIndex: 30,
-      paddingHorizontal: 16,
-      paddingBottom: 28,
-      // Fill comes from <GlassSheetSurface> below, not a solid colour. No
-      // overflow: 'hidden' here — that would kill the drop shadow on iOS; the
-      // surface clips its own material to these corners instead.
-      backgroundColor: 'transparent',
-      borderTopLeftRadius: STOCK_SHEET_TOP_RADIUS,
-      borderTopRightRadius: STOCK_SHEET_TOP_RADIUS,
-      shadowColor: c.text,
-      shadowOffset: { width: 0, height: -8 },
-      shadowOpacity: 0.08,
-      shadowRadius: 18,
-      elevation: 12,
-    },
-    tradeSheetDragArea: {
-      // Fills the overlay so the whole sheet — handle, header and keypad — is a
-      // drag-to-dismiss surface. The pan only claims the touch after a downward
-      // drag (activeOffsetY), so keypad taps still work.
-      flex: 1,
-    },
-    tradeSheetHandleHit: {
-      alignSelf: 'stretch',
-      alignItems: 'center',
-      // Tall, full-width target so the swipe-to-dismiss gesture is easy to grab —
-      // a thin strip here made the sheet feel like it couldn't be dragged.
-      paddingTop: 14,
-      paddingBottom: 22,
-    },
-    tradeSheetHandle: {
-      width: 44,
-      height: 5,
-      borderRadius: 2.5,
-      backgroundColor: sheetColors.border,
     },
     pillRow: {
       flexDirection: 'row',

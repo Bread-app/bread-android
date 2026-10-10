@@ -11,9 +11,7 @@ import {
 import Animated, {
   Easing,
   Extrapolation,
-  FadeOut,
   interpolate,
-  LinearTransition,
   runOnJS,
   useAnimatedStyle,
   useSharedValue,
@@ -22,6 +20,7 @@ import Animated, {
 } from 'react-native-reanimated';
 
 import { AssetLogo } from '@/components/asset-logo';
+import { AnimatedAmountDigits } from '@/components/animated-amount-digits';
 import { SlideToConfirm } from '@/components/trade-amount-sheet';
 import { Fonts, type ThemeColors } from '@/constants/theme';
 import { getSheetColors } from '@/lib/sheet-colors';
@@ -39,6 +38,7 @@ import { LeverageRuler } from '@/components/leverage-ruler';
 import { ValueSkeleton, ValueSkeletonLine } from '@/components/value-skeleton';
 import type { PhoenixTradeSide } from '@/lib/phoenix-api';
 import { PressableScale } from '@/components/pressable-scale';
+import { RotatingChevron } from '@/components/rotating-chevron';
 
 const F = Fonts.rounded;
 
@@ -117,24 +117,7 @@ export type PhoenixOrderPadProps = {
   onAutoClose?: () => void;
 };
 
-const DIGIT_SPRING = { damping: 18, stiffness: 320, mass: 0.6 };
-const AMOUNT_LAYOUT = LinearTransition.springify().damping(22).stiffness(300).mass(0.6);
-const AMOUNT_EXIT = FadeOut.duration(90);
 
-/** A typed digit rises a few points and settles, like a counter ticking. */
-function digitEntering() {
-  'worklet';
-  return {
-    initialValues: { opacity: 0, transform: [{ translateY: 12 }, { scale: 0.7 }] },
-    animations: {
-      opacity: withTiming(1, { duration: 110 }),
-      transform: [
-        { translateY: withSpring(0, DIGIT_SPRING) },
-        { scale: withSpring(1, DIGIT_SPRING) },
-      ],
-    },
-  };
-}
 
 /**
  * Full-height order pad for a Phoenix perp — the screen behind the LONG / SHORT
@@ -291,7 +274,7 @@ export function PhoenixOrderPad({
         <Text style={styles.quantityText}>
           {quantity === null ? '—' : quantity.toLocaleString('en-US', { maximumFractionDigits: 6 })} {symbol}
         </Text>
-        <Ionicons name={detailsOpen ? 'chevron-up' : 'chevron-down'} size={15} color={colors.textSecondary} />
+        <RotatingChevron up={detailsOpen} size={15} color={colors.textSecondary} />
       </PressableScale>
     </View>
   );
@@ -344,23 +327,14 @@ export function PhoenixOrderPad({
 
       <View style={styles.amountBlock}>
         <View style={[styles.amountRow, !(margin > 0) && styles.amountPlaceholder]}>
-          <Animated.Text layout={AMOUNT_LAYOUT} style={[styles.amountCurrency, { fontSize: amountFont * 0.8 }]}>
+          <Text style={[styles.amountCurrency, { fontSize: amountFont * 0.8 }]}>
             $
-          </Animated.Text>
-          {/* One view per character, keyed by position: a new digit springs
-              in at the end, a deleted one fades out, and the rest glide to
-              their new centre instead of the whole number jumping. */}
-          {(typed || '0').split('').map((char, index) => (
-            <Animated.Text
-              key={typed ? `d${index}` : 'zero'}
-              entering={digitEntering}
-              exiting={AMOUNT_EXIT}
-              layout={AMOUNT_LAYOUT}
-              style={[styles.amountValue, { fontSize: amountFont }]}
-            >
-              {char}
-            </Animated.Text>
-          ))}
+          </Text>
+          <AnimatedAmountDigits
+            value={typed || '0'}
+            style={[styles.amountValue, { fontSize: amountFont }]}
+            shrinkToFit={false}
+          />
         </View>
         {/* Reads as a consequence of the amount above it. Sitting on top, it
             was the first figure on the ticket and the one being typed was the

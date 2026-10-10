@@ -23,12 +23,14 @@ import {
   Alert,
   Image,
   Keyboard,
+  LayoutAnimation,
   type LayoutChangeEvent,
   Platform,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
+import { useReducedMotion } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { BlurBackdrop } from '@/components/blur-backdrop';
@@ -229,6 +231,18 @@ export const SandwichCommentsSheet = forwardRef<SandwichCommentsSheetRef, Props>
       }
     }, [loading, loadingMore, nextCursor, setComments, toast]);
 
+    // The thread is a gorhom FlatList, which can't carry Reanimated layout
+    // animations, so list-shape changes go through LayoutAnimation: a posted
+    // comment fades in at the top and pushes the rest down, a deleted one
+    // fades out while the rest close the gap (and a failed delete fades back).
+    const reduceMotion = useReducedMotion();
+    const animateNextListChange = useCallback(() => {
+      if (reduceMotion) return;
+      LayoutAnimation.configureNext(
+        LayoutAnimation.create(220, LayoutAnimation.Types.easeInEaseOut, LayoutAnimation.Properties.opacity),
+      );
+    }, [reduceMotion]);
+
     const submit = useCallback(async () => {
       const body = draft.trim();
       const thread = threadRef.current;
@@ -236,6 +250,7 @@ export const SandwichCommentsSheet = forwardRef<SandwichCommentsSheetRef, Props>
       setSubmitting(true);
       try {
         const created = await postThreadComment(thread, body);
+        animateNextListChange();
         setComments((current) => [created, ...current.filter((row) => row.id !== created.id)]);
         setDraft('');
         // Newest-first list: the comment lands at the top, so a list scrolled
@@ -251,7 +266,7 @@ export const SandwichCommentsSheet = forwardRef<SandwichCommentsSheetRef, Props>
       } finally {
         setSubmitting(false);
       }
-    }, [draft, onCountChange, threadKey, setComments, setKnownCount, submitting, toast]);
+    }, [animateNextListChange, draft, onCountChange, threadKey, setComments, setKnownCount, submitting, toast]);
 
     const confirmDelete = useCallback((comment: SandwichComment) => {
       const thread = threadRef.current;
@@ -264,12 +279,14 @@ export const SandwichCommentsSheet = forwardRef<SandwichCommentsSheetRef, Props>
           onPress: () => {
             const removedIndex = commentsRef.current.findIndex((row) => row.id === comment.id);
             const previousCount = knownCountRef.current;
+            animateNextListChange();
             setComments((current) => current.filter((row) => row.id !== comment.id));
             const nextCount = setKnownCount(previousCount - 1);
             onCountChange?.(threadKey, nextCount);
             void deleteThreadComment(thread, comment.id).catch((cause: unknown) => {
               // Put it back where it was, not at the top — a failed delete that
               // reordered the thread looked like the comment had been reposted.
+              animateNextListChange();
               setComments((current) => {
                 if (current.some((row) => row.id === comment.id)) return current;
                 const restored = [...current];
@@ -283,7 +300,7 @@ export const SandwichCommentsSheet = forwardRef<SandwichCommentsSheetRef, Props>
           },
         },
       ]);
-    }, [onCountChange, threadKey, setComments, setKnownCount, toast]);
+    }, [animateNextListChange, onCountChange, threadKey, setComments, setKnownCount, toast]);
 
     const renderComment = useCallback(({ item }: { item: SandwichComment }) => (
       <View style={styles.commentRow}>

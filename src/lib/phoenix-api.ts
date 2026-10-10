@@ -14,6 +14,8 @@ import {
   isHyperliquidPerpSymbol,
   toPerpMarketDetail,
 } from '@/lib/hyperliquid-perp-market';
+import { demoPhoenixAccountResponse, getDemoPerps } from '@/lib/demo-account';
+import { isDemoBuyMode } from '@/lib/demo-buy-mode';
 import { isDemoMode } from '@/lib/demo/demo-config';
 import {
   inferPhoenixPositionLeverage,
@@ -458,6 +460,17 @@ export async function getPhoenixAccount(): Promise<PhoenixAccountResponse> {
   if (isDemoMode()) {
     const { demoPhoenixAccount } = await import('./demo/demo-portfolio');
     return demoPhoenixAccount();
+  }
+
+  // Settings → Demo buys: the open perps are the paper account's, marked at
+  // live Phoenix prices so their PnL moves like a real position's.
+  if (isDemoBuyMode()) {
+    const symbols = (await getDemoPerps()).map((perp) => perp.symbol);
+    const marks =
+      symbols.length > 0
+        ? (await getPhoenixPrices(symbols).catch(() => null))?.prices ?? {}
+        : {};
+    return demoPhoenixAccountResponse(marks);
   }
 
   const response = await phoenixGet<PhoenixAccountResponse>('/account', { auth: true });

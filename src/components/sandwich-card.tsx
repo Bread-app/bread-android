@@ -52,6 +52,7 @@ import { useOptionalSavedStore, useSavedStore } from "@/lib/saved-store";
 import { useThemeStore } from "@/lib/theme-store";
 import { stripHiddenUrls, useTweetMedia, type TweetMedia } from "@/lib/tweet-media";
 import { useToast } from "@/lib/toast-store";
+import { RotatingChevron } from "@/components/rotating-chevron";
 
 /**
  * Every Sandwich feed card, and the rows and chrome they are built from.
@@ -129,11 +130,7 @@ export function SourceCitation({
       {/* A deleted post keeps its citation — attribution is never silently
           dropped just because the original is gone. */}
       {first.unavailable ? <Text style={styles.citationUnavailable}>unavailable</Text> : null}
-      <Ionicons
-        name={expanded ? "chevron-up" : "chevron-down"}
-        size={12}
-        color={colors.textTertiary}
-      />
+      <RotatingChevron up={expanded} size={12} color={colors.textTertiary} />
     </PressableScale>
   );
 }

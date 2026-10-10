@@ -8,7 +8,8 @@ import {
 import Foundation from '@expo/vector-icons/Foundation';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import React from 'react';
-import { Image, Platform } from 'react-native';
+import { Image, Platform, StyleSheet, View } from 'react-native';
+import { TabsComposeFab } from '@/components/compose-fab';
 import { FloatingTabBar } from '@/components/floating-tab-bar';
 import { HAS_LIQUID_GLASS } from '@/lib/liquid-glass';
 import { useThemeStore } from '@/lib/theme-store';
@@ -94,106 +95,128 @@ export default function TabsLayout() {
 
   if (USE_FLOATING_TAB_BAR) {
     return (
-      <Tabs
-        tabBar={(props) => <FloatingTabBar {...props} />}
-        screenOptions={{
-          headerShown: false,
-          // Hidden tabs stay mounted; freezing them stops wallet/price polling
-          // from re-rendering screens nobody can see — the main source of
-          // dropped frames on mid-range Android.
-          freezeOnBlur: Platform.OS === 'android',
-        }}>
-        <Tabs.Screen name="home" />
-        <Tabs.Screen name="sandwich" />
-        <Tabs.Screen name="wallet" />
-        <Tabs.Screen name="profile" />
-        <Tabs.Screen name="search" />
-        {/* Reached from the profile menu / dev only, not the tab bar. */}
-        <Tabs.Screen name="like-to-buy" options={{ href: null }} />
-        <Tabs.Screen name="saved" options={{ href: null }} />
-      </Tabs>
+      <TabsWithComposeFab>
+        <Tabs
+          tabBar={(props) => <FloatingTabBar {...props} />}
+          screenOptions={{
+            headerShown: false,
+            // Hidden tabs stay mounted; freezing them stops wallet/price polling
+            // from re-rendering screens nobody can see — the main source of
+            // dropped frames on mid-range Android.
+            freezeOnBlur: Platform.OS === 'android',
+          }}>
+          <Tabs.Screen name="home" />
+          <Tabs.Screen name="sandwich" />
+          <Tabs.Screen name="wallet" />
+          <Tabs.Screen name="profile" />
+          <Tabs.Screen name="search" />
+          {/* Reached from the profile menu / dev only, not the tab bar. */}
+          <Tabs.Screen name="like-to-buy" options={{ href: null }} />
+          <Tabs.Screen name="saved" options={{ href: null }} />
+        </Tabs>
+      </TabsWithComposeFab>
     );
   }
 
   return (
-    <NativeTabs
-      tintColor={activeTint}
-      iconColor={{ default: colors.textTertiary, selected: activeTint }}
-      backgroundColor={withAlpha(colors.background, 0.96)}
-      blurEffect={
-        scheme === 'dark'
-          ? 'systemChromeMaterialDark'
-          : 'systemChromeMaterialLight'
-      }
-      shadowColor={withAlpha(colors.border, 0.7)}
-      disableTransparentOnScrollEdge
-      disableIndicator
-      indicatorColor="transparent"
-      rippleColor="transparent"
-      minimizeBehavior="onScrollUp">
-      <NativeTabs.Trigger name="home">
-        <Label hidden />
-        <Icon
-          src={{
-            default: <VectorIcon family={MutedFoundation} name="home" />,
-            selected: <VectorIcon family={FoundationTabIcon} name="home" />,
-          }}
-          selectedColor={activeTint}
-        />
-      </NativeTabs.Trigger>
+    <TabsWithComposeFab>
+      <NativeTabs
+        tintColor={activeTint}
+        iconColor={{ default: colors.textTertiary, selected: activeTint }}
+        backgroundColor={withAlpha(colors.background, 0.96)}
+        blurEffect={
+          scheme === 'dark'
+            ? 'systemChromeMaterialDark'
+            : 'systemChromeMaterialLight'
+        }
+        shadowColor={withAlpha(colors.border, 0.7)}
+        disableTransparentOnScrollEdge
+        disableIndicator
+        indicatorColor="transparent"
+        rippleColor="transparent"
+        minimizeBehavior="onScrollUp">
+        <NativeTabs.Trigger name="home">
+          <Label hidden />
+          <Icon
+            src={{
+              default: <VectorIcon family={MutedFoundation} name="home" />,
+              selected: <VectorIcon family={FoundationTabIcon} name="home" />,
+            }}
+            selectedColor={activeTint}
+          />
+        </NativeTabs.Trigger>
 
-      {/* Social feed of sandwiches — sits in slot 2. */}
-      <NativeTabs.Trigger name="sandwich">
-        <Label hidden />
-        <Icon
-          src={{
-            default: <VectorIcon family={MutedMaterialIcons} name="explore" />,
-            selected: <VectorIcon family={MaterialTabIcon} name="explore" />,
-          }}
-          selectedColor={activeTint}
-        />
-      </NativeTabs.Trigger>
+        {/* Social feed of sandwiches — sits in slot 2. */}
+        <NativeTabs.Trigger name="sandwich">
+          <Label hidden />
+          <Icon
+            src={{
+              default: <VectorIcon family={MutedMaterialIcons} name="explore" />,
+              selected: <VectorIcon family={MaterialTabIcon} name="explore" />,
+            }}
+            selectedColor={activeTint}
+          />
+        </NativeTabs.Trigger>
 
-      {/* Wallet sits in slot 3 (Like-to-Buy is hidden for now — still reachable
-          from the profile menu via the `/auto-buy` route). */}
-      <NativeTabs.Trigger name="wallet">
-        <Label hidden />
-        <Icon
-          src={{
-            default: walletMutedIcon,
-            selected: walletSelectedIcon,
-          }}
-          selectedColor={activeTint}
-        />
-      </NativeTabs.Trigger>
+        {/* Wallet sits in slot 3 (Like-to-Buy is hidden for now — still reachable
+            from the profile menu via the `/auto-buy` route). */}
+        <NativeTabs.Trigger name="wallet">
+          <Label hidden />
+          <Icon
+            src={{
+              default: walletMutedIcon,
+              selected: walletSelectedIcon,
+            }}
+            selectedColor={activeTint}
+          />
+        </NativeTabs.Trigger>
 
-      <NativeTabs.Trigger name="profile">
-        <Label hidden />
-        <Icon
-          src={{
-            default: <VectorIcon family={MutedMaterialIcons} name="person" />,
-            selected: <VectorIcon family={MaterialTabIcon} name="person" />,
-          }}
-          selectedColor={activeTint}
-        />
-      </NativeTabs.Trigger>
+        <NativeTabs.Trigger name="profile">
+          <Label hidden />
+          <Icon
+            src={{
+              default: <VectorIcon family={MutedMaterialIcons} name="person" />,
+              selected: <VectorIcon family={MaterialTabIcon} name="person" />,
+            }}
+            selectedColor={activeTint}
+          />
+        </NativeTabs.Trigger>
 
-      {/* iOS 26 renders this as the system search tab (trailing, magnify icon);
-          the route hosts our custom search field + results. */}
-      <NativeTabs.Trigger name="search" role="search">
-        <Label hidden />
-        <Icon
-          src={{
-            default: <VectorIcon family={MutedMaterialIcons} name="search" />,
-            selected: <VectorIcon family={MaterialTabIcon} name="search" />,
-          }}
-          selectedColor={activeTint}
-        />
-      </NativeTabs.Trigger>
+        {/* iOS 26 renders this as the system search tab (trailing, magnify icon);
+            the route hosts our custom search field + results. */}
+        <NativeTabs.Trigger name="search" role="search">
+          <Label hidden />
+          <Icon
+            src={{
+              default: <VectorIcon family={MutedMaterialIcons} name="search" />,
+              selected: <VectorIcon family={MaterialTabIcon} name="search" />,
+            }}
+            selectedColor={activeTint}
+          />
+        </NativeTabs.Trigger>
 
-      {/* Reached from the profile menu / dev only, not the tab bar. */}
-      <NativeTabs.Trigger name="like-to-buy" hidden />
-      <NativeTabs.Trigger name="saved" hidden />
-    </NativeTabs>
+        {/* Reached from the profile menu / dev only, not the tab bar. */}
+        <NativeTabs.Trigger name="like-to-buy" hidden />
+        <NativeTabs.Trigger name="saved" hidden />
+      </NativeTabs>
+    </TabsWithComposeFab>
   );
 }
+
+/**
+ * The tab bar plus the one "+" that floats over Home and the Sandwich feed.
+ * Drawn here, above the tab screens, so it is the same button on both rather
+ * than one per screen re-mounting on every switch (see `TabsComposeFab`).
+ */
+function TabsWithComposeFab({ children }: { children: React.ReactNode }) {
+  return (
+    <View style={styles.root}>
+      {children}
+      <TabsComposeFab />
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  root: { flex: 1 },
+});

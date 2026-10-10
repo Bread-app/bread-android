@@ -1,6 +1,7 @@
 import * as SecureStore from 'expo-secure-store';
 
 import type { PublicSandwichPosition, Sandwich, SandwichBuyLeg } from './api';
+import { isDemoBuyMode } from './demo-buy-mode';
 
 const STORAGE_PREFIX = 'sandwich_positions_v1';
 /**
@@ -74,7 +75,10 @@ function soldStorageKey(walletAddress: string) {
 }
 
 function walletKeyFor(walletAddress: string) {
-  return walletAddress.trim().replace(SECURE_STORE_KEY_RE, '_') || 'unknown';
+  const key = walletAddress.trim().replace(SECURE_STORE_KEY_RE, '_') || 'unknown';
+  // Demo Sandwiches live in their own namespace, so demo mode shows only demo
+  // positions and turning it off brings the real ones straight back.
+  return isDemoBuyMode() ? `demo.${key}` : key;
 }
 
 /** sandwichId → ISO timestamp of the exit this device recorded. */
@@ -197,6 +201,12 @@ async function readPositions(walletAddress: string): Promise<SandwichPosition[]>
 
 async function writePositions(walletAddress: string, positions: SandwichPosition[]): Promise<void> {
   await SecureStore.setItemAsync(storageKey(walletAddress), JSON.stringify(positions));
+}
+
+/** Forget every stored position for this wallet (in the current namespace). */
+export async function clearStoredSandwichPositions(walletAddress: string): Promise<void> {
+  await SecureStore.deleteItemAsync(storageKey(walletAddress)).catch(() => {});
+  await SecureStore.deleteItemAsync(soldStorageKey(walletAddress)).catch(() => {});
 }
 
 export async function getStoredSandwichPositions(walletAddress: string): Promise<SandwichPosition[]> {

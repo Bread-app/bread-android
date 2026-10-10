@@ -22,6 +22,7 @@ import { useThemeStore } from '@/lib/theme-store';
 import { useToast } from '@/lib/toast-store';
 import { useTradeFx } from '@/lib/trade-fx';
 import { useWalletStore } from '@/lib/wallet-store';
+import { RotatingChevron } from '@/components/rotating-chevron';
 
 const F = Fonts.rounded;
 
@@ -381,11 +382,7 @@ export function PodcastCallSheet({
                 <Text style={styles.captionMoreText}>
                   {captionExpanded ? 'Show less' : 'Show more'}
                 </Text>
-                <Ionicons
-                  name={captionExpanded ? 'chevron-up' : 'chevron-down'}
-                  size={12}
-                  color={colors.accentBlue}
-                />
+                <RotatingChevron up={captionExpanded} size={12} color={colors.accentBlue} />
               </PressableScale>
             ) : null}
           </PressableScale>

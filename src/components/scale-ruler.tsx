@@ -1,7 +1,8 @@
 import * as Haptics from 'expo-haptics';
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import Animated, { runOnJS, useAnimatedStyle, useSharedValue } from 'react-native-reanimated';
 
 import { Fonts, type ThemeColors } from '@/constants/theme';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
@@ -79,6 +80,12 @@ export type ScaleRulerProps = {
    */
   hideMajorTicks?: boolean;
   height?: number;
+  /** Drag from the current needle value without jumping to the touch location. */
+  relativeDrag?: boolean;
+  /** Track linear ruler drags on the UI thread, independently of React updates. */
+  smoothDrag?: boolean;
+  /** Optional value interval for haptic detents, independent of tick labels. */
+  hapticEvery?: number;
 };
 
 /**
@@ -111,11 +118,17 @@ export function ScaleRuler({
   hideBubble = false,
   hideMajorTicks = false,
   height = 34,
+  relativeDrag = false,
+  smoothDrag = false,
+  hapticEvery,
 }: ScaleRulerProps) {
   const styles = useThemedStyles(makeStyles);
   const [trackWidth, setTrackWidth] = useState(0);
   // Detents fire on the ticks the user can actually see go past.
   const lastMajorRef = useRef<number | null>(null);
+  const dragOriginX = useRef(0);
+  const lastAppliedValue = useRef(value);
+  const dragActive = useRef(false);
 
   const range = Math.max(max - min, 1e-9);
   const decimals = Math.max(0, Math.ceil(-Math.log10(step)));
@@ -166,34 +179,144 @@ export function ScaleRuler({
       // drawn majors are evenly spaced in pixels, so the count comes from the
       // needle's position rather than from a value interval that would tick
       // constantly at the top of the scale and never at the bottom.
-      const major = log
+      const major = hapticEvery && hapticEvery > 0
+        ? Math.round(snapped / hapticEvery)
+        : log
         ? Math.round(fractionOf(snapped) * (usable / MIN_MAJOR_GAP))
         : Math.round(snapped / majorInterval);
       if (lastMajorRef.current !== null && major !== lastMajorRef.current) {
         void Haptics.selectionAsync();
       }
       lastMajorRef.current = major;
+      lastAppliedValue.current = snapped;
       if (snapped !== value) onChange(snapped);
       if (commit) onCommit?.(snapped);
     },
-    [clampValue, fractionOf, log, majorInterval, onChange, onCommit, step, usable, valueOf, value],
+    [clampValue, fractionOf, hapticEvery, log, majorInterval, onChange, onCommit, step, usable, valueOf, value],
   );
 
   const gesture = useMemo(() => {
     const pan = Gesture.Pan()
-      // Claim only horizontal movement; vertical drags fall through to the
-      // parent scroll view.
+      // Horizontal movement adjusts the value; vertical movement scrolls.
       .activeOffsetX([-8, 8])
       .failOffsetY([-12, 12])
       .runOnJS(true)
-      .onStart((event) => applyX(event.x, false))
-      .onUpdate((event) => applyX(event.x, false))
-      .onEnd((event) => applyX(event.x, true));
+      .onBegin(() => {
+        dragOriginX.current = xForValue(value);
+        lastAppliedValue.current = value;
+        lastMajorRef.current = null;
+      })
+      .onStart((event) => {
+        dragActive.current = true;
+        if (relativeDrag) void Haptics.selectionAsync();
+        applyX(relativeDrag ? dragOriginX.current + event.translationX : event.x, false);
+      })
+      .onUpdate((event) => {
+        applyX(relativeDrag ? dragOriginX.current + event.translationX : event.x, false);
+      })
+      .onEnd((event) => {
+        applyX(relativeDrag ? dragOriginX.current + event.translationX : event.x, true);
+      })
+      .onFinalize((_event, success) => {
+        // Keep the visible allocation when the OS interrupts an active drag.
+        if (!success && dragActive.current) onCommit?.(lastAppliedValue.current);
+        dragActive.current = false;
+      });
     const tap = Gesture.Tap()
       .runOnJS(true)
-      .onEnd((event) => applyX(event.x, true));
+      .onEnd((event, success) => {
+        if (!success) return;
+        lastMajorRef.current = null;
+        if (relativeDrag) void Haptics.selectionAsync();
+        applyX(event.x, true);
+      });
     return Gesture.Race(pan, tap);
-  }, [applyX]);
+  }, [applyX, onCommit, relativeDrag, value, xForValue]);
+
+  // The allocation ruler follows the finger at display refresh rate. React
+  // receives whole-step changes for the labels and the other allocations.
+  const uiFraction = useSharedValue(fractionOf(value));
+  const uiDragging = useSharedValue(false);
+  const uiActive = useSharedValue(false);
+  const uiOrigin = useSharedValue(0);
+  const uiPublished = useSharedValue(value);
+  const uiHapticBucket = useSharedValue(-1);
+  const useSmoothDrag = smoothDrag && !log;
+
+  useEffect(() => {
+    if (!uiDragging.value) {
+      uiFraction.value = fractionOf(value);
+      uiPublished.value = value;
+    }
+  }, [fractionOf, uiDragging, uiFraction, uiPublished, value]);
+
+  const smoothNeedleStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: EDGE + uiFraction.value * usable - NEEDLE_WIDTH / 2 }],
+  }));
+  const selectionHaptic = useCallback(() => { void Haptics.selectionAsync(); }, []);
+  const finishSmoothDrag = useCallback((next: number) => {
+    onChange(next);
+    onCommit?.(next);
+  }, [onChange, onCommit]);
+
+  const smoothGesture = useMemo(() => {
+    const update = (fraction: number, commit: boolean) => {
+      'worklet';
+      const clamped = Math.min(1, Math.max(0, fraction));
+      const raw = min + clamped * range;
+      const snapped = Math.min(max, Math.max(min,
+        Number((Math.round(raw / step) * step).toFixed(decimals))));
+      // Keep the needle continuous; snap only the committed allocation.
+      uiFraction.value = clamped;
+      const bucket = Math.round(snapped / (hapticEvery && hapticEvery > 0 ? hapticEvery : majorInterval));
+      if (uiHapticBucket.value !== -1 && bucket !== uiHapticBucket.value) {
+        runOnJS(selectionHaptic)();
+      }
+      uiHapticBucket.value = bucket;
+      if (commit) {
+        uiPublished.value = snapped;
+        uiFraction.value = (snapped - min) / range;
+        runOnJS(finishSmoothDrag)(snapped);
+      } else if (snapped !== uiPublished.value) {
+        uiPublished.value = snapped;
+        runOnJS(onChange)(snapped);
+      }
+    };
+    const pan = Gesture.Pan()
+      .activeOffsetX([-8, 8])
+      .failOffsetY([-12, 12])
+      .onBegin(() => {
+        uiOrigin.value = uiFraction.value;
+        uiDragging.value = true;
+        uiHapticBucket.value = -1;
+      })
+      .onStart((event) => {
+        uiActive.value = true;
+        runOnJS(selectionHaptic)();
+        update(relativeDrag ? uiOrigin.value + event.translationX / usable : (event.x - EDGE) / usable, false);
+      })
+      .onUpdate((event) => {
+        update(relativeDrag ? uiOrigin.value + event.translationX / usable : (event.x - EDGE) / usable, false);
+      })
+      .onEnd((event) => {
+        update(relativeDrag ? uiOrigin.value + event.translationX / usable : (event.x - EDGE) / usable, true);
+      })
+      .onFinalize((_event, success) => {
+        if (!success && uiActive.value) {
+          update(uiFraction.value, true);
+        }
+        uiDragging.value = false;
+        uiActive.value = false;
+      });
+    const tap = Gesture.Tap().onEnd((event, success) => {
+      if (!success) return;
+      uiHapticBucket.value = -1;
+      runOnJS(selectionHaptic)();
+      update((event.x - EDGE) / usable, true);
+    });
+    return Gesture.Race(pan, tap);
+  }, [decimals, finishSmoothDrag, hapticEvery, majorInterval, max, min, onChange, range, relativeDrag,
+    selectionHaptic, step, uiActive, uiDragging, uiFraction, uiHapticBucket, uiOrigin, uiPublished, usable]);
 
   // Minor hatch: a uniform run of short ticks fitted to the width.
   const minorCount = trackWidth > 0 ? Math.floor(usable / MINOR_GAP) : 0;
@@ -232,7 +355,7 @@ export function ScaleRuler({
         </View>
       )}
 
-      <GestureDetector gesture={gesture}>
+      <GestureDetector gesture={useSmoothDrag ? smoothGesture : gesture}>
         <View
           accessibilityRole="adjustable"
           accessibilityValue={{ min, max, now: value }}
@@ -289,11 +412,12 @@ export function ScaleRuler({
 
           {/* The needle — it moves to the value; the scale does not. */}
           {trackWidth > 0 ? (
-            <View
+            <Animated.View
               pointerEvents="none"
               style={[
                 styles.needle,
-                { height, left: needleX - NEEDLE_WIDTH / 2, backgroundColor: accent },
+                { height, left: useSmoothDrag ? 0 : needleX - NEEDLE_WIDTH / 2, backgroundColor: accent },
+                useSmoothDrag ? smoothNeedleStyle : null,
               ]}
             />
           ) : null}

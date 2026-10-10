@@ -26,11 +26,17 @@ export function HeldPositionActions({
   onClose,
   buyLabel = 'BUY MORE',
   closeLabel = 'CLOSE',
+  fullSizeLabels = false,
 }: {
   onBuyMore?: () => void;
   onClose: () => void;
   buyLabel?: string;
   closeLabel?: string;
+  /**
+   * Keep the full CTA label size even when paired, as the Sandwich screen's
+   * pinned BUY MORE / SELL do. Only for a row that spans the screen's width.
+   */
+  fullSizeLabels?: boolean;
 }) {
   const styles = useThemedStyles(makeStyles);
   const { colors, scheme } = useThemeStore();
@@ -38,7 +44,7 @@ export function HeldPositionActions({
   // Two buttons share the row, so each label only gets half the width. At the
   // lone button's 24pt "BUY MORE" wraps onto a second line and spills past the
   // pill — the paired size is the 19pt a sandwich's own held row uses.
-  const paired = Boolean(onBuyMore);
+  const paired = Boolean(onBuyMore) && !fullSizeLabels;
 
   return (
     <View style={styles.row}>
@@ -139,7 +145,7 @@ function Action({
             numberOfLines={1}
             adjustsFontSizeToFit
             minimumFontScale={0.75}
-            style={[styles.text, paired ? styles.textPaired : null]}
+            style={[styles.text, compact ? styles.textPaired : null]}
           >
             {label.toUpperCase()}
           </Text>

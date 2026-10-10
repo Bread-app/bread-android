@@ -23,7 +23,6 @@ import {
   ActivityIndicator,
   Keyboard,
   LayoutAnimation,
-  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -32,8 +31,8 @@ import {
   useWindowDimensions,
 } from 'react-native';
 import { AssetLogo } from '@/components/asset-logo';
+import { AnimatedAmountDigits } from '@/components/animated-amount-digits';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-import { GlassView, isGlassEffectAPIAvailable } from 'expo-glass-effect';
 import * as Haptics from 'expo-haptics';
 import Animated, {
   ReduceMotion,
@@ -53,9 +52,10 @@ import {
   NUMERIC_KEYPAD_ROWS,
 } from '@/lib/numeric-keypad-layout';
 import { useThemeStore } from '@/lib/theme-store';
+import { CtaButton } from '@/components/side-glass-button';
 import { PressableScale } from '@/components/pressable-scale';
+import { RotatingChevron } from '@/components/rotating-chevron';
 
-const HAS_GLASS = Platform.OS === 'ios' && isGlassEffectAPIAvailable();
 const F = Fonts.rounded;
 
 /**
@@ -124,6 +124,12 @@ export type TradeAmountPadProps = {
    *  prediction-market $5 floor). Shown as a pill; kept separate from `message`
    *  (which stays near the confirm button for errors/status). */
   amountNote?: string | null;
+  /** Render `amountNote` as bare red text (no pill, dot, border or fill) —
+   *  for inline validation like a withdrawal minimum. */
+  amountNotePlain?: boolean;
+  /** Each typed digit springs into place and the rest glide aside, instead of
+   *  the whole figure swapping at once. Enabled by default across amount sheets. */
+  animateAmount?: boolean;
   submitting: boolean;
   canConfirm: boolean;
   onSubmit: () => void | Promise<void>;
@@ -165,6 +171,8 @@ export type TradeAmountPadProps = {
    * emphasis. See TradeQuotePreviewRow.
    */
   previewContent?: React.ReactNode;
+  /** Keep room for changing quotes; disable when a pad never shows a quote. */
+  reservePreviewSpace?: boolean;
   /**
    * Rows for the drop-up detail panel opened from the footer — slippage, the
    * on-chain floor, the effective price, whatever the venue actually said.
@@ -186,7 +194,6 @@ export type TradeAmountPadProps = {
   thesisContent?: React.ReactNode;
   /** When set, renders a back affordance in a header row (for in-sheet overlay use). */
   onBack?: () => void;
-  useGreenGradientButton?: boolean;
   /** Replaces the standard trade button with a deliberate slide-to-confirm control. */
   slideToConfirm?: boolean;
   /**
@@ -399,6 +406,7 @@ export function SlideToConfirm({
  * in-sheet overlay (e.g. inside the stock-detail sheet, where stacking a second
  * modal is unreliable on the New Architecture). See [[bottom-sheet-present-pattern]].
  */
+
 export function TradeAmountPad({
   side = 'buy',
   symbol,
@@ -416,6 +424,8 @@ export function TradeAmountPad({
   amount,
   message,
   amountNote,
+  amountNotePlain = false,
+  animateAmount = true,
   submitting,
   canConfirm,
   onSubmit,
@@ -433,13 +443,13 @@ export function TradeAmountPad({
   noticeActionLabel,
   onNoticeAction,
   previewContent,
+  reservePreviewSpace = true,
   thesisText,
   thesisContent,
   detailRows,
   detailLabel = 'Details',
   onBack,
   scrollEnabled = true,
-  useGreenGradientButton = false,
   slideToConfirm = false,
   addCash = false,
   actionLabel: actionLabelOverride,
@@ -466,10 +476,6 @@ export function TradeAmountPad({
   // The tap button that stands in for the track keeps its footprint, so the
   // keypad above does not shift when the amount crosses the balance.
   const slideStandInStyle = slideToConfirm && addCash ? styles.slideStandIn : null;
-  // The layer painted INSIDE the stand-in only takes its height: repeating the
-  // margin there offset it 10pt inside the solid wrapper, which read as a
-  // second button nested in the first.
-  const slideStandInFillStyle = slideToConfirm && addCash ? styles.slideStandInFill : null;
   const slideActionLabel = confirmLabel ?? actionLabel;
 
   // Strip the leading "Cash balance: " / "Stock balance: " prefix so the footer
@@ -482,6 +488,9 @@ export function TradeAmountPad({
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [noticeOpen, setNoticeOpen] = useState(false);
   const hasDetails = (detailRows?.length ?? 0) > 0;
+  // Fixed native-sheet pads need a regular View: UIKit can reposition a
+  // nested ScrollView independently of the sheet's horizontal padding.
+  const AmountContainer = scrollEnabled ? ScrollView : View;
   // A pad whose rows vanish mid-interaction (amount cleared, quote dropped)
   // must not keep an empty panel open.
   useEffect(() => {
@@ -495,11 +504,12 @@ export function TradeAmountPad({
 
   return (
     <View style={styles.body}>
-      <ScrollView
-        style={styles.scrollArea}
-        contentContainerStyle={styles.scrollContent}
-        scrollEnabled={scrollEnabled}
-        showsVerticalScrollIndicator={false}>
+      <AmountContainer
+        style={[styles.scrollArea, !scrollEnabled && styles.scrollContent]}
+        {...(scrollEnabled ? {
+          contentContainerStyle: styles.scrollContent,
+          showsVerticalScrollIndicator: false,
+        } : {})}>
         {/* Header row — icon + name + subtitle on the left, price + change right. */}
         <View style={styles.headerRow}>
           <View style={styles.headerLeft}>
@@ -578,14 +588,24 @@ export function TradeAmountPad({
               {amountUnitPosition === 'prefix' ? (
                 <Text style={styles.amountCurrency}>{unitSymbol}</Text>
               ) : null}
-              <Text style={styles.amountValue} numberOfLines={1} adjustsFontSizeToFit>
-                {amount || '0'}
-              </Text>
+              {animateAmount ? (
+                <AnimatedAmountDigits value={amount || '0'} style={styles.amountValue} />
+              ) : (
+                <Text style={styles.amountValue} numberOfLines={1} adjustsFontSizeToFit>
+                  {amount || '0'}
+                </Text>
+              )}
               {amountUnitPosition === 'suffix' ? (
                 <Text style={styles.amountCurrency}>{unitSymbol}</Text>
               ) : null}
             </View>
-            {amountNote ? (
+            {amountNotePlain ? (
+              // Always mounted at a fixed height so the amount above never
+              // shifts when the message comes and goes.
+              <Text style={[styles.amountNotePlainText, { color: colors.negative }]} numberOfLines={1}>
+                {amountNote ?? ''}
+              </Text>
+            ) : amountNote ? (
               <View style={styles.amountNotePill}>
                 <View style={styles.amountNoteDot} />
                 <Text style={styles.amountNoteText} numberOfLines={2}>
@@ -597,7 +617,9 @@ export function TradeAmountPad({
                 in-flight, refused) and the block above is vertically centred,
                 so without a reserved row every change re-centred it and the
                 amount hopped up and down under the user's thumb. */}
-            <View style={styles.previewSlot}>{previewContent}</View>
+            {reservePreviewSpace || previewContent ? (
+              <View style={styles.previewSlot}>{previewContent}</View>
+            ) : null}
           </View>
 
           {thesisContent ? (
@@ -608,7 +630,7 @@ export function TradeAmountPad({
             </Text>
           ) : null}
         </View>
-      </ScrollView>
+      </AmountContainer>
 
       <View style={styles.bottomSection}>
         {noticeText ? (
@@ -625,11 +647,7 @@ export function TradeAmountPad({
                 ]}>
                 <Ionicons name="warning-outline" size={18} color={noticeAmber} />
                 <Text style={styles.noticeSummaryText}>{noticeLabel}</Text>
-                <Ionicons
-                  name={noticeOpen ? 'chevron-up' : 'chevron-down'}
-                  size={14}
-                  color={noticeAmber}
-                />
+                <RotatingChevron up={noticeOpen} size={14} color={noticeAmber} />
               </Pressable>
             ) : null}
             {!noticeCollapsible || noticeOpen ? (
@@ -766,11 +784,7 @@ export function TradeAmountPad({
                   }}
                   style={styles.detailTrigger}>
                   <Text style={styles.detailTriggerText}>{detailLabel}</Text>
-                  <Ionicons
-                    name={detailsOpen ? 'chevron-down' : 'chevron-up'}
-                    size={13}
-                    color={colors.textTertiary}
-                  />
+                  <RotatingChevron up={!detailsOpen} size={13} color={colors.textTertiary} />
                 </PressableScale>
               ) : null}
             </View>
@@ -798,84 +812,27 @@ export function TradeAmountPad({
               void onSubmit();
             }}
           />
-        ) : useGreenGradientButton ? (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={confirmLabel ?? `Confirm ${actionLabel.toLowerCase()}`}
-            onPressIn={() => {
-              if (canConfirm) onSubmitPressIn?.();
-            }}
-            onPress={() => {
-              Keyboard.dismiss();
-              void onSubmit();
-            }}
-            disabled={!canConfirm}
-            style={({ pressed }) => [
-              styles.greenBtnWrap,
-              slideStandInStyle,
-              // Solid accent underneath, always. The GlassView on top is a
-              // native layer that paints nothing when the system decides its
-              // material is invisible against the host background — on the buy
-              // pad's near-white sheet that left a white-on-white confirm
-              // button in a correctly-sized (so silently blank) slot.
-              { backgroundColor: actionColor },
-              !canConfirm && styles.confirmDisabled,
-              pressed && canConfirm && styles.confirmPressed,
-            ]}>
-            {HAS_GLASS ? (
-              <GlassView
-                glassEffectStyle="regular"
-                isInteractive
-                tintColor={actionColor}
-                // The in-app Light/Dark toggle is independent of the OS
-                // appearance, so the scheme has to be passed explicitly —
-                // same as phoenix-order-pad's GlassButton.
-                colorScheme={scheme === 'dark' ? 'dark' : 'light'}
-                style={[styles.greenBtn, slideStandInFillStyle]}>
-                {submitting ? (
-                  <ActivityIndicator color="#ffffff" size="small" />
-                ) : (
-                  <Text style={styles.greenBtnText}>{(confirmLabel ?? `Confirm ${actionLabel}`).toUpperCase()}</Text>
-                )}
-                {submitting ? <Text style={styles.greenBtnText}>{(submittingLabel ?? `${actionLabel}ing...`).toUpperCase()}</Text> : null}
-              </GlassView>
-            ) : (
-              <View style={[styles.greenBtn, slideStandInFillStyle, { backgroundColor: actionColor }]}>
-                {submitting ? (
-                  <ActivityIndicator color="#ffffff" size="small" />
-                ) : (
-                  <Text style={styles.greenBtnText}>{(confirmLabel ?? `Confirm ${actionLabel}`).toUpperCase()}</Text>
-                )}
-                {submitting ? <Text style={styles.greenBtnText}>{(submittingLabel ?? `${actionLabel}ing...`).toUpperCase()}</Text> : null}
-              </View>
-            )}
-          </Pressable>
         ) : (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={confirmLabel ?? `Confirm ${actionLabel.toLowerCase()}`}
-            onPressIn={() => {
-              if (canConfirm) onSubmitPressIn?.();
-            }}
-            onPress={() => {
-              Keyboard.dismiss();
-              void onSubmit();
-            }}
-            disabled={!canConfirm}
-            style={({ pressed }) => [
-              styles.confirmBtn,
-              slideStandInStyle,
-              { backgroundColor: actionColor },
-              !canConfirm && styles.confirmDisabled,
-              pressed && canConfirm && styles.confirmPressed,
-            ]}>
-            {submitting ? (
-              <ActivityIndicator color="#ffffff" size="small" />
-            ) : (
-              <Text style={styles.confirmText}>{confirmLabel ?? `Confirm ${actionLabel}`}</Text>
-            )}
-            {submitting ? <Text style={styles.confirmText}>{submittingLabel ?? `${actionLabel}ing...`}</Text> : null}
-          </Pressable>
+          // The app's shared CTA pill (same family as the Sandwich BUY). As a
+          // stand-in for the slide track it keeps the track's footprint, so the
+          // keypad above does not shift when the amount crosses the balance.
+          <View style={slideStandInStyle ?? styles.confirmWrap}>
+            <CtaButton
+              label={confirmLabel ?? `Confirm ${actionLabel}`}
+              accessibilityLabel={confirmLabel ?? `Confirm ${actionLabel.toLowerCase()}`}
+              color={actionColor}
+              onPressIn={() => {
+                if (canConfirm) onSubmitPressIn?.();
+              }}
+              onPress={() => {
+                Keyboard.dismiss();
+                void onSubmit();
+              }}
+              disabled={!canConfirm && !submitting}
+              loading={submitting}
+              loadingLabel={submittingLabel ?? `${actionLabel}ing...`}
+            />
+          </View>
         )}
       </View>
     </View>
@@ -890,6 +847,7 @@ export const TradeAmountSheet = forwardRef<TradeAmountSheetRef, TradeAmountSheet
   amountUnitLabel,
   availableLabel,
   amount,
+  animateAmount,
   message,
   submitting,
   canConfirm,
@@ -1005,6 +963,7 @@ export const TradeAmountSheet = forwardRef<TradeAmountSheetRef, TradeAmountSheet
           amountUnitLabel={amountUnitLabel}
           availableLabel={availableLabel}
           amount={amount}
+          animateAmount={animateAmount}
           message={message}
           submitting={submitting}
           canConfirm={canConfirm}
@@ -1201,6 +1160,17 @@ const makeStyles = (c: ThemeColors) => {
     backgroundColor: 'rgba(124, 58, 237, 0.10)',
     borderWidth: 1,
     borderColor: 'rgba(124, 58, 237, 0.22)',
+  },
+  amountNotePlainText: {
+    alignSelf: 'center',
+    maxWidth: '86%',
+    marginTop: 12,
+    height: 18,
+    fontSize: 14,
+    lineHeight: 18,
+    fontWeight: '700',
+    fontFamily: F,
+    textAlign: 'center',
   },
   amountNoteDot: {
     width: 7,
@@ -1455,25 +1425,6 @@ const makeStyles = (c: ThemeColors) => {
     textAlign: 'center',
     fontFamily: F,
   },
-  confirmBtn: {
-    marginTop: 12,
-    borderRadius: 18,
-    overflow: 'hidden' as const,
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexDirection: 'row',
-    gap: 10,
-    paddingVertical: 14,
-  },
-  confirmPressed: {
-    opacity: 0.8,
-  },
-  confirmText: {
-    color: '#ffffff',
-    fontSize: 24,
-    fontFamily: 'Rubik_900Black',
-    letterSpacing: 1,
-  },
   confirmDisabled: {
     opacity: 0.4,
   },
@@ -1486,9 +1437,10 @@ const makeStyles = (c: ThemeColors) => {
   slideStandIn: {
     marginTop: 10,
     minHeight: SLIDE_HEIGHT,
+    justifyContent: 'center',
   },
-  slideStandInFill: {
-    minHeight: SLIDE_HEIGHT,
+  confirmWrap: {
+    marginTop: 12,
   },
   slideTrack: {
     height: SLIDE_HEIGHT,
@@ -1539,29 +1491,6 @@ const makeStyles = (c: ThemeColors) => {
   },
   padBackPressed: {
     backgroundColor: c.surfaceAlt,
-  },
-  greenBtnWrap: {
-    marginTop: 12,
-    borderRadius: 18,
-    overflow: 'hidden' as const,
-    width: '100%',
-  },
-  greenBtn: {
-    width: '100%',
-    // Explicit height — GlassView is a native view and won't auto-size to its
-    // text child, so without this the glass button collapses to 0 height.
-    minHeight: 56,
-    paddingVertical: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexDirection: 'row',
-    gap: 10,
-  },
-  greenBtnText: {
-    color: '#ffffff',
-    fontSize: 24,
-    fontFamily: 'Rubik_900Black',
-    letterSpacing: 1,
   },
 });
 };

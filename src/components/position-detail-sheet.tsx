@@ -1,12 +1,22 @@
-import { BottomSheetBackdrop, BottomSheetModal, BottomSheetScrollView } from '@gorhom/bottom-sheet';
+import {
+  BottomSheetBackdrop,
+  BottomSheetFooter,
+  type BottomSheetFooterProps,
+  BottomSheetModal,
+  BottomSheetScrollView,
+} from '@gorhom/bottom-sheet';
 import { SheetModal } from '@/components/sheet-modal';
 import Ionicons from '@expo/vector-icons/Ionicons';
-import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
+import * as Haptics from 'expo-haptics';
+import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { useAnimatedReaction, useDerivedValue, useSharedValue } from 'react-native-reanimated';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AssetLogo } from '@/components/asset-logo';
 import { HeldPositionActions } from '@/components/held-position-actions';
-import { SandwichBasketChart } from '@/components/sandwich-basket-chart';
+import { CTA_BUTTON_HEIGHT } from '@/components/side-glass-button';
+import { SandwichBasketChart, type SandwichChartRange } from '@/components/sandwich-basket-chart';
 import { SandwichPositionCard } from '@/components/sandwich-position-card';
 import { VerifiedBadge } from '@/components/verified-badge';
 import { isXPostSource, SourcePostCard } from '@/components/x-post-preview';
@@ -16,6 +26,8 @@ import { useThemedStyles } from '@/hooks/use-themed-styles';
 import type { PositionDetail, Sandwich, SandwichProvenance } from '@/lib/api';
 import type { SandwichPosition } from '@/lib/sandwich-positions';
 import { useThemeStore } from '@/lib/theme-store';
+import { CTA, ctaBottomInset } from '@/lib/screen-corners';
+import { symbolLogoSources } from '@/lib/stock-logos';
 import { PressableScale } from '@/components/pressable-scale';
 
 const F = Fonts.rounded;
@@ -71,6 +83,7 @@ function PositionDetailSheet({
 }, ref) {
   const styles = useThemedStyles(makeStyles);
   const { colors } = useThemeStore();
+  const insets = useSafeAreaInsets();
   const sheetRef = useRef<BottomSheetModal>(null);
   /** Real on-screen state, from gorhom's own callbacks. */
   const presentedRef = useRef(false);
@@ -80,6 +93,30 @@ function PositionDetailSheet({
    * present animation is what made the sheet stutter on its way up.
    */
   const [settled, setSettled] = useState(false);
+  // Opens on ALL, like the Sandwich screen: the curve spans the whole thesis.
+  const [chartRange, setChartRange] = useState<SandwichChartRange>('ALL');
+  // Scrubbing the chart drives the share card: it shows what the position was
+  // worth under the finger, scaled by the basket's move relative to now. The
+  // chart writes the return under the finger; its resting value (what it holds
+  // whenever no finger is down) is the "now" that move is measured against.
+  // All UI-thread.
+  const scrubReturn = useSharedValue(Number.NaN);
+  const scrubReturnActive = useSharedValue(0);
+  const scrubbing = useSharedValue(0);
+  const restReturn = useSharedValue(Number.NaN);
+  useAnimatedReaction(
+    () => (scrubbing.value === 0 ? scrubReturn.value : null),
+    (rest) => {
+      if (rest !== null) restReturn.value = rest;
+    },
+  );
+  const scrubRatio = useDerivedValue(() => {
+    const at = scrubReturn.value;
+    const now = restReturn.value;
+    if (Number.isNaN(at) || Number.isNaN(now) || 1 + now / 100 <= 0) return 1;
+    return (1 + at / 100) / (1 + now / 100);
+  });
+  const cardScrub = useMemo(() => ({ active: scrubbing, ratio: scrubRatio }), [scrubbing, scrubRatio]);
 
   // What the sheet shows: the data handed to `present`, superseded by the
   // host's prop whenever that carries something newer for the same position.
@@ -180,12 +217,32 @@ function PositionDetailSheet({
     : meta?.authorAvatarUrl ?? detail?.logoUri ?? null;
   const postedAt = detail?.openedAt ?? detail?.chart.openedAt ?? null;
 
+  // The chart is the Sandwich's own — the same curve its screen draws, from
+  // when it was created — with the viewer's fills pinned on it ("+" where they
+  // aped in). Without the Sandwich loaded it falls back to the position's
+  // window. Memoised: a new legs array refetches every leg's candles.
+  const sandwichLegs = useMemo(
+    () => (sandwich?.legs.length ? [...sandwich.legs].sort((a, b) => a.order - b.order) : null),
+    [sandwich],
+  );
+  const chartLegs = sandwichLegs ?? detail?.chart.legs ?? [];
+  const chartStart = sandwichLegs ? sandwich?.createdAt ?? null : detail?.chart.openedAt ?? null;
+  const chartReturnPct = sandwichLegs
+    ? sandwich && sandwich.pnlStatus !== 'unavailable' && sandwich.pnlPct !== null && Math.abs(sandwich.pnlPct) > 0.05
+      ? sandwich.pnlPct
+      : null
+    : pnlPct;
+  // Under a day old there's only ALL, so no row at all.
+  const rangePills = sandwichLegs && !closed ? chartRangePills(chartStart) : [];
+
   // Per-unit prices only when both ends have one; otherwise dollars in and out.
   // Mixing them printed a $3 stake as "Avg. entry" beside a $0.26 unit exit.
   const unitPrices =
     !multiAsset &&
     detail?.avgEntryPriceUsd != null &&
     (closed ? detail.avgExitPriceUsd != null : currentUnitPrice(detail, shown?.currentValueUsd) != null);
+  // The viewer's own Sandwich only — the composer needs a Sandwich to attach to.
+  const canAddThesis = !!onAddThesis && !!detail?.sandwichId;
   const entryLabel = unitPrices ? 'Avg. entry' : 'Invested';
   const exitLabel = unitPrices
     ? closed ? 'Avg. exit' : 'Current'
@@ -195,12 +252,37 @@ function PositionDetailSheet({
     ? price(closed ? detail?.avgExitPriceUsd : currentUnitPrice(detail, shown?.currentValueUsd))
     : money(closed ? detail?.proceedsUsd : shown?.currentValueUsd);
 
+  // BUY MORE / SELL stay pinned to the sheet's bottom edge, as on the
+  // Sandwich screen, instead of scrolling away mid-content.
+  const showActions = !!shown && !closed && !!onBuyMore && !!onClosePosition;
+  const footerBottom = ctaBottomInset(insets.bottom);
+  const renderFooter = useCallback(
+    (props: BottomSheetFooterProps) =>
+      showActions && shown ? (
+        <BottomSheetFooter {...props}>
+          <View style={[styles.footer, { paddingBottom: footerBottom }]}>
+            <HeldPositionActions
+              onBuyMore={() => onBuyMore?.(shown)}
+              onClose={() => onClosePosition?.(shown)}
+              closeLabel="SELL"
+              fullSizeLabels
+            />
+          </View>
+        </BottomSheetFooter>
+      ) : null,
+    [footerBottom, onBuyMore, onClosePosition, showActions, shown, styles.footer],
+  );
+
   return (
     <SheetModal
       ref={sheetRef}
+      footerComponent={renderFooter}
       snapPoints={['88%']}
       enableDynamicSizing={false}
       enablePanDownToClose
+      // A sideways drag is the chart's scrub, never the sheet's pull-down: let
+      // the sheet's own pan fail on it so the chart's gesture can take over.
+      failOffsetX={SHEET_FAIL_OFFSET_X}
       onChange={(index) => {
         if (index >= 0) {
           presentedRef.current = true;
@@ -217,6 +299,7 @@ function PositionDetailSheet({
         settledRef.current = false;
         pendingRef.current = null;
         setSettled(false);
+        setChartRange('ALL');
         setPresented(null);
         onDismiss();
       }}
@@ -224,7 +307,14 @@ function PositionDetailSheet({
       handleIndicatorStyle={styles.handle}
       backgroundStyle={styles.sheetBg}
     >
-      <BottomSheetScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+      <BottomSheetScrollView
+        contentContainerStyle={[
+          styles.content,
+          // Room for the pinned actions, so the last row can scroll clear of them.
+          showActions && { paddingBottom: CTA_BUTTON_HEIGHT + footerBottom + 28 },
+        ]}
+        showsVerticalScrollIndicator={false}
+      >
         {detail && shown ? (
           <>
             <View style={styles.header}>
@@ -279,43 +369,86 @@ function PositionDetailSheet({
               <Text style={styles.thesis}>{thesis}</Text>
             ) : null}
 
+            {/* A closed position leads with what it realized; an open one's
+                money lives on the share card below the chart. */}
+            {closed ? (
+              <View style={styles.hero}>
+                <Text style={styles.heroLabel}>Realized</Text>
+                <Text style={[styles.heroValue, { color: accent }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
+                  {pnlUsd == null ? '—' : `${pnlUsd >= 0 ? '+' : '−'}${money(Math.abs(pnlUsd))}`}
+                </Text>
+                <View style={styles.heroDeltaRow}>
+                  {pnlPct != null && pnlPct !== 0 ? (
+                    <Ionicons name={positive ? 'caret-up' : 'caret-down'} size={13} color={accent} />
+                  ) : null}
+                  <Text style={[styles.heroDelta, { color: accent }]} numberOfLines={1}>
+                    {pnlPct == null ? '—' : `${Math.abs(pnlPct).toFixed(2)}%`}
+                  </Text>
+                  <Text style={styles.heroDeltaMeta}>return</Text>
+                </View>
+              </View>
+            ) : null}
+
             <View style={styles.chartBlock}>
               {settled ? (
                 <SandwichBasketChart
-                  legs={detail.chart.legs}
-                  createdAt={detail.chart.openedAt}
+                  legs={chartLegs}
+                  createdAt={chartStart}
                   endedAt={detail.chart.closedAt}
                   markers={detail.fills}
-                  targetReturnPct={pnlPct}
+                  targetReturnPct={chartRange === 'ALL' ? chartReturnPct : null}
+                  window={rangePills.length > 1 ? chartRange : undefined}
+                  showDotGrid
                   showReturn={false}
-                  hideFooter
+                  insetX={CHART_INSET_X}
                   height={CHART_HEIGHT}
+                  scrubValue={scrubReturn}
+                  scrubValueActive={scrubReturnActive}
+                  scrubbing={scrubbing}
                 />
               ) : (
                 <View style={{ height: CHART_HEIGHT }} />
               )}
+              {rangePills.length > 1 ? (
+                <View style={styles.chartRangeRow}>
+                  {rangePills.map(({ label, range }) => {
+                    const active = chartRange === range;
+                    return (
+                      <Pressable
+                        key={range}
+                        accessibilityRole="button"
+                        accessibilityState={{ selected: active }}
+                        accessibilityLabel={`Show ${label} chart`}
+                        hitSlop={8}
+                        onPress={() => {
+                          if (active) return;
+                          void Haptics.selectionAsync();
+                          setChartRange(range);
+                        }}
+                        style={styles.chartRangePill}
+                      >
+                        <Text style={[styles.chartRangePillText, active && styles.chartRangePillTextActive]}>
+                          {label}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              ) : null}
             </View>
 
             {closed ? (
-              <View style={styles.result}>
-                <View style={styles.resultTop}>
-                  <Text style={[styles.pnl, { color: accent }]} numberOfLines={1}>
-                    {pnlUsd == null ? '—' : `${pnlUsd >= 0 ? '+' : '−'}${money(Math.abs(pnlUsd))}`}
-                  </Text>
-                  <Text style={[styles.returnPct, { color: accent }]}>
-                    {pnlPct == null ? '—' : `${pnlPct > 0 ? '▲ ' : pnlPct < 0 ? '▼ ' : ''}${Math.abs(pnlPct).toFixed(2)}%`}
-                  </Text>
-                </View>
+              <View style={styles.statsCard}>
                 <View style={styles.metricRow}>
                   <Metric label={entryLabel} value={entryValue} styles={styles} />
                   <Metric label={exitLabel} value={exitValue} align="right" styles={styles} />
                 </View>
               </View>
             ) : (
-              // An open position is the same card the Sandwich screen shows:
-              // value and PnL, invested and opened, Add thesis and Share. The
-              // figures are always passed in — this sheet is portalled above
-              // the wallet provider, so the card can't value it itself.
+              // The same share card the Sandwich screen shows: value and PnL,
+              // invested and opened, Share on the grey footer. The figures are
+              // always passed in — this sheet is portalled above the wallet
+              // provider, so the card can't value it itself.
               <View style={styles.positionCard}>
                 <SandwichPositionCard
                   position={positionFromDetail(detail)}
@@ -326,11 +459,12 @@ function PositionDetailSheet({
                     returnPct: pnlPct,
                   }}
                   onShare={() => onShare(shown)}
+                  scrub={cardScrub}
                   onAddThesis={
-                    onAddThesis && detail.sandwichId
+                    canAddThesis
                       ? (open) => {
                           sheetRef.current?.dismiss();
-                          onAddThesis(open);
+                          onAddThesis?.(open);
                         }
                       : null
                   }
@@ -342,10 +476,20 @@ function PositionDetailSheet({
               <View style={styles.legChips}>
                 {detail.chart.legs.map((leg, index) => {
                   const symbol = leg.symbol ?? leg.label;
+                  const asset = sandwich?.legs.find((candidate) => candidate.id === leg.id);
+                  const derived = leg.type === 'prediction_market'
+                    ? { uri: null, fallbackUris: [] }
+                    : symbolLogoSources(asset?.underlyingSymbol ?? symbol);
                   return (
                     <View key={leg.id} style={styles.legChip}>
                       <AssetLogo
-                        uri={meta?.legIcons[index] ?? null}
+                        uri={asset?.imageUrl ?? meta?.legIcons[index] ?? null}
+                        fallbackUris={[
+                          meta?.legIcons[index],
+                          detail.chart.legs.length === 1 ? detail.logoUri : null,
+                          derived.uri,
+                          ...derived.fallbackUris,
+                        ]}
                         size={18}
                         borderRadius={9}
                         backgroundColor={colors.surface}
@@ -364,13 +508,6 @@ function PositionDetailSheet({
               </View>
             ) : null}
 
-            {!closed && onBuyMore && onClosePosition ? (
-              <HeldPositionActions
-                onBuyMore={() => onBuyMore(shown)}
-                onClose={() => onClosePosition(shown)}
-              />
-            ) : null}
-
             {detail.sandwichId ? (
               <PressableScale onPress={() => onViewFull(shown)} style={styles.viewFull}>
                 <Text style={styles.viewFullText}>{youtube ? 'View all from this video' : 'View full Sandwich'}</Text>
@@ -384,7 +521,27 @@ function PositionDetailSheet({
   );
 });
 
-const CHART_HEIGHT = 170;
+const CHART_HEIGHT = 130;
+const SHEET_FAIL_OFFSET_X: [number, number] = [-8, 8];
+
+// The Sandwich screen's range pills, kept local: importing them from
+// sandwich-screen would make an inline-require cycle.
+const CHART_RANGE_PILLS: { label: string; range: SandwichChartRange; seconds: number }[] = [
+  { label: '24H', range: '24H', seconds: 24 * 60 * 60 },
+  { label: '1W', range: '1W', seconds: 7 * 24 * 60 * 60 },
+  { label: '1M', range: '1M', seconds: 30 * 24 * 60 * 60 },
+  { label: '3M', range: '3M', seconds: 90 * 24 * 60 * 60 },
+  { label: 'ALL', range: 'ALL', seconds: Number.POSITIVE_INFINITY },
+];
+
+/** Only windows shorter than the Sandwich's life, plus ALL. */
+function chartRangePills(createdAt: string | null) {
+  const age = createdAt ? (Date.now() - new Date(createdAt).getTime()) / 1000 : Number.NaN;
+  if (!Number.isFinite(age)) return CHART_RANGE_PILLS;
+  return CHART_RANGE_PILLS.filter((pill) => pill.range === 'ALL' || pill.seconds < age);
+}
+/** Room for the entry marker and the live dot, which sit on the line's ends. */
+const CHART_INSET_X = 10;
 
 function Metric({ label, value, align, styles }: {
   label: string;
@@ -458,19 +615,28 @@ const makeStyles = (c: ThemeColors) => StyleSheet.create({
   iconButton: { width: 32, height: 32, borderRadius: 16, backgroundColor: c.surfaceAlt, alignItems: 'center', justifyContent: 'center' },
   video: { aspectRatio: 16 / 9, borderRadius: 16, overflow: 'hidden', backgroundColor: '#000000' },
   thesis: { color: c.text, fontFamily: F, fontSize: 16, lineHeight: 23, fontWeight: '600' },
-  chartBlock: {},
-  result: { gap: 12 },
+  hero: { marginTop: 4 },
+  heroLabel: { color: c.textTertiary, fontFamily: F, fontSize: 13, fontWeight: '700' },
+  heroValue: { color: c.text, fontFamily: Fonts.displayMedium, fontSize: 34, lineHeight: 40, fontVariant: ['tabular-nums'], marginTop: 2 },
+  heroDeltaRow: { flexDirection: 'row', alignItems: 'center', gap: 3, marginTop: 2 },
+  heroDelta: { fontFamily: Fonts.displayMedium, fontSize: 15, fontVariant: ['tabular-nums'], flexShrink: 1 },
+  heroDeltaMeta: { color: c.textTertiary, fontFamily: F, fontSize: 13, fontWeight: '600', marginLeft: 3 },
+  // Bleeds past the content gutter so the line uses the sheet's full width.
+  chartBlock: { marginHorizontal: -8 },
+  chartRangeRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 22, marginTop: 6 },
+  chartRangePill: { paddingVertical: 6, paddingHorizontal: 4 },
+  chartRangePillText: { color: c.textTertiary, fontFamily: F, fontSize: 14, fontWeight: '700' },
+  chartRangePillTextActive: { color: c.text, fontSize: 15, fontWeight: '900' },
   // The card carries its own 12pt side margin for the detail screen; cancel
   // it so the card lines up with the rest of this sheet's content.
   positionCard: { marginHorizontal: -12 },
-  resultTop: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: 12 },
-  pnl: { fontFamily: Fonts.displayMedium, fontSize: 28, fontWeight: '900', flexShrink: 1 },
-  returnPct: { fontFamily: F, fontSize: 16, fontWeight: '800', fontVariant: ['tabular-nums'] },
-  metricRow: { flexDirection: 'row', gap: 16 },
+  statsCard: { borderRadius: 16, backgroundColor: c.surfaceAlt, paddingHorizontal: 14, paddingTop: 12, paddingBottom: 2 },
+  metricRow: { flexDirection: 'row', gap: 12, paddingBottom: 10 },
   metric: { flex: 1 },
   metricRight: { alignItems: 'flex-end' },
   metricLabel: { color: c.textTertiary, fontFamily: F, fontSize: 12, fontWeight: '700' },
-  metricValue: { color: c.text, fontFamily: F, fontSize: 16, fontWeight: '800', marginTop: 3, fontVariant: ['tabular-nums'] },
+  metricValue: { color: c.text, fontFamily: F, fontSize: 15, fontWeight: '800', marginTop: 3, fontVariant: ['tabular-nums'] },
+  footer: { paddingHorizontal: CTA.inset, paddingTop: 12 },
   legChips: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
   legChip: { flexDirection: 'row', alignItems: 'center', gap: 5, height: 28, paddingLeft: 5, paddingRight: 9, borderRadius: 14, backgroundColor: c.surfaceAlt },
   legChipFallback: { width: 18, height: 18, borderRadius: 9, alignItems: 'center', justifyContent: 'center', backgroundColor: c.surface },

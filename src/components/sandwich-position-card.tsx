@@ -2,8 +2,10 @@ import Ionicons from "@expo/vector-icons/Ionicons";
 import { router as expoRouter } from "expo-router";
 import React from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
+import Animated, { useAnimatedStyle, useDerivedValue, type SharedValue } from "react-native-reanimated";
 
 import { AddThesisButton } from "@/components/add-thesis-button";
+import { AnimatedScrubText } from "@/components/animated-scrub-text";
 import { ShareIcon } from "@/components/share-icon";
 import { Fonts, type ThemeColors } from "@/constants/theme";
 import { useThemedStyles } from "@/hooks/use-themed-styles";
@@ -48,6 +50,30 @@ function formatOpenedAgo(iso: string | null | undefined): string {
   if (months < 12) return `${months}mo ago`;
   return `${Math.floor(days / 365)}y ago`;
 }
+
+/** `formatMoneyUsd` for the UI thread, where Intl isn't available. */
+function workletMoney(value: number): string {
+  "worklet";
+  const fixed = Math.abs(value).toFixed(2);
+  const [whole, cents] = fixed.split(".");
+  let grouped = "";
+  for (let i = 0; i < whole.length; i++) {
+    if (i > 0 && (whole.length - i) % 3 === 0) grouped += ",";
+    grouped += whole[i];
+  }
+  return `$${grouped}.${cents}`;
+}
+
+/**
+ * Drives the card from a chart scrub. `ratio` is the basket's value under the
+ * finger relative to now — (1 + r_t) / (1 + r_now), the same basis on both
+ * sides, so it holds in any range window — and the card shows what this
+ * position would have been worth at that moment. `active` is 1 mid-scrub.
+ */
+export type PositionCardScrub = {
+  active: SharedValue<number>;
+  ratio: SharedValue<number>;
+};
 /**
  * Portfolio summary shown only when the viewer owns this sandwich. It mirrors
  * the spot-asset position card: value and unrealized PnL lead, while cost and
@@ -70,8 +96,11 @@ export function SandwichPositionCard({
   onShare,
   onAddThesis,
   valuationOverride,
+  scrub,
 }: {
   position: SandwichPosition;
+  /** Follow a chart scrub instead of only showing the live figures. */
+  scrub?: PositionCardScrub | null;
   /** The sandwich behind the position — the source of the return shown. */
   sandwich?: Sandwich | null;
   /**
@@ -107,6 +136,42 @@ export function SandwichPositionCard({
   const positive = (pnl ?? 0) >= 0;
   const accent = positive ? colors.positive : colors.negative;
   const openedLabel = formatOpenedAgo(position.createdAt);
+  const valueText = formatMoneyUsd(currentValue) ?? "$0.00";
+  const pnlText = pnl === null ? "—" : `${pnl >= 0 ? "+" : "−"}${formatMoneyUsd(Math.abs(pnl)) ?? "$0.00"}`;
+  const returnText = returnPct === null ? "—" : `${Math.abs(returnPct).toFixed(2)}%`;
+  // Mid-scrub figures, all on the UI thread. Without a value and a cost there
+  // is nothing to scale, so the card keeps its live figures.
+  const canScrub = !!scrub && currentValue !== null && invested !== null && invested > 0;
+  const positiveColor = colors.positive;
+  const negativeColor = colors.negative;
+  const scrubbed = useDerivedValue(() => {
+    if (!scrub || !canScrub || scrub.active.value === 0) return null;
+    const value = (currentValue as number) * scrub.ratio.value;
+    const delta = value - (invested as number);
+    return { value, delta, pct: (delta / (invested as number)) * 100 };
+  });
+  const valueLabel = useDerivedValue(() => (scrubbed.value ? workletMoney(scrubbed.value.value) : valueText));
+  const pnlLabel = useDerivedValue(() => {
+    const live = scrubbed.value;
+    if (!live) return pnlText;
+    return `${live.delta >= 0 ? "+" : "−"}${workletMoney(live.delta)}`;
+  });
+  const returnLabel = useDerivedValue(() =>
+    scrubbed.value ? `${Math.abs(scrubbed.value.pct).toFixed(2)}%` : returnText,
+  );
+  const accentLive = useDerivedValue(() => {
+    const live = scrubbed.value;
+    if (!live) return positive ? positiveColor : negativeColor;
+    return live.delta >= 0 ? positiveColor : negativeColor;
+  });
+  const caretUpStyle = useAnimatedStyle(() => {
+    const live = scrubbed.value;
+    return { opacity: (live ? live.delta >= 0 : positive) ? 1 : 0 };
+  });
+  const caretDownStyle = useAnimatedStyle(() => {
+    const live = scrubbed.value;
+    return { opacity: (live ? live.delta >= 0 : positive) ? 0 : 1 };
+  });
   const openThesisComposer = () => {
     const route = takeComposerRoute({
       positionKind: "sandwichId",
@@ -134,38 +199,69 @@ export function SandwichPositionCard({
       >
         <View style={styles.detailPositionHeadline}>
           <View style={styles.detailPositionValueGroup}>
-            <Text
-              numberOfLines={1}
-              adjustsFontSizeToFit
-              minimumFontScale={0.72}
-              style={styles.detailPositionValue}
-            >
-              {formatMoneyUsd(currentValue) ?? "$0.00"}
-            </Text>
+            {canScrub ? (
+              <AnimatedScrubText text={valueLabel} style={styles.detailPositionValue} />
+            ) : (
+              <Text
+                numberOfLines={1}
+                adjustsFontSizeToFit
+                minimumFontScale={0.72}
+                style={styles.detailPositionValue}
+              >
+                {valueText}
+              </Text>
+            )}
           </View>
           <View style={styles.detailPositionPnlGroup}>
-            <Text
-              numberOfLines={1}
-              adjustsFontSizeToFit
-              minimumFontScale={0.72}
-              style={[styles.detailPositionPnl, { color: accent }]}
-            >
-              {pnl === null
-                ? "—"
-                : `${pnl >= 0 ? "+" : "−"}${formatMoneyUsd(Math.abs(pnl)) ?? "$0.00"}`}
-            </Text>
-            <View style={styles.detailPositionReturnRow}>
-              {returnPct !== null ? (
-                <Ionicons
-                  name={positive ? "caret-up" : "caret-down"}
-                  size={13}
-                  color={accent}
+            {canScrub ? (
+              <>
+                <AnimatedScrubText
+                  text={pnlLabel}
+                  color={accentLive}
+                  style={[styles.detailPositionPnl, styles.detailPositionScrubText]}
                 />
-              ) : null}
-              <Text style={[styles.detailPositionReturn, { color: accent }]}>
-                {returnPct === null ? "—" : `${Math.abs(returnPct).toFixed(2)}%`}
-              </Text>
-            </View>
+                <View style={styles.detailPositionReturnRow}>
+                  {returnPct !== null ? (
+                    <View style={styles.detailPositionCaret}>
+                      <Animated.View style={[StyleSheet.absoluteFill, caretUpStyle]}>
+                        <Ionicons name="caret-up" size={13} color={positiveColor} />
+                      </Animated.View>
+                      <Animated.View style={[StyleSheet.absoluteFill, caretDownStyle]}>
+                        <Ionicons name="caret-down" size={13} color={negativeColor} />
+                      </Animated.View>
+                    </View>
+                  ) : null}
+                  <AnimatedScrubText
+                    text={returnLabel}
+                    color={accentLive}
+                    style={[styles.detailPositionReturn, styles.detailPositionReturnScrub]}
+                  />
+                </View>
+              </>
+            ) : (
+              <>
+                <Text
+                  numberOfLines={1}
+                  adjustsFontSizeToFit
+                  minimumFontScale={0.72}
+                  style={[styles.detailPositionPnl, { color: accent }]}
+                >
+                  {pnlText}
+                </Text>
+                <View style={styles.detailPositionReturnRow}>
+                  {returnPct !== null ? (
+                    <Ionicons
+                      name={positive ? "caret-up" : "caret-down"}
+                      size={13}
+                      color={accent}
+                    />
+                  ) : null}
+                  <Text style={[styles.detailPositionReturn, { color: accent }]}>
+                    {returnText}
+                  </Text>
+                </View>
+              </>
+            )}
           </View>
         </View>
         <View style={styles.detailPositionBasisRow}>
@@ -292,6 +388,11 @@ const makeStyles = (c: ThemeColors) =>
     fontVariant: ["tabular-nums"],
     textAlign: "right",
   },
+  // The scrub labels are TextInputs that can't size to their text, so they
+  // span their group and align inside it.
+  detailPositionScrubText: { alignSelf: "stretch" },
+  detailPositionReturnScrub: { minWidth: 56, textAlign: "right" },
+  detailPositionCaret: { width: 13, height: 13 },
   detailPositionReturnRow: {
     flexDirection: "row",
     alignItems: "center",

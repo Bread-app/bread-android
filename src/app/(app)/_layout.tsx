@@ -15,6 +15,8 @@ import { PodcastGroupProvider } from '@/lib/podcast-group-store';
 import { SandwichDetailProvider } from '@/lib/sandwich-detail-store';
 import { StockDetailProvider } from '@/lib/stock-detail-store';
 import { PhoenixPositionSheetProvider } from '@/lib/phoenix-position-sheet-store';
+import { StockTradeSheetProvider } from '@/lib/stock-trade-sheet-store';
+import { SandwichTradeSheetProvider } from '@/lib/sandwich-trade-sheet-store';
 import { SandwichComposerProvider } from '@/lib/sandwich-composer-store';
 import { ComposerProgressProvider } from '@/lib/composer-progress-store';
 import { NotificationsProvider } from '@/lib/notifications-store';
@@ -75,6 +77,8 @@ export default function ProtectedAppLayout() {
               <SandwichDetailProvider>
                 <StockDetailProvider>
                 <PhoenixPositionSheetProvider>
+                <SandwichTradeSheetProvider>
+                <StockTradeSheetProvider>
                 <PodcastGroupProvider>
                 <SandwichComposerProvider>
                 <ComposerProgressProvider>
@@ -336,6 +340,46 @@ export default function ProtectedAppLayout() {
                       contentStyle: { backgroundColor: colors.background },
                     }}
                   />
+                  {/* The route gives the pad a bounded height; fitToContents
+                      keeps that compact layout without the clipping caused by
+                      fractional detents with a full-height flex root. */}
+                  <Stack.Screen
+                    name="sandwich-trade"
+                    options={{
+                      headerShown: false,
+                      presentation: 'formSheet',
+                      sheetAllowedDetents: 'fitToContents',
+                      sheetGrabberVisible: false,
+                      sheetCornerRadius: 28,
+                      contentStyle: { backgroundColor: colors.background },
+                    }}
+                  />
+                  <Stack.Screen
+                    name="stock-trade"
+                    options={{
+                      headerShown: false,
+                      presentation: 'formSheet',
+                      sheetAllowedDetents: [1],
+                      sheetGrabberVisible: false,
+                      sheetCornerRadius: 28,
+                      contentStyle: { bottom: 0, backgroundColor: colors.background },
+                    }}
+                  />
+                  {/* Withdraw as a native form sheet at the large detent: the
+                      keypad and address list want a fixed tall sheet, not one
+                      that resizes per step. `bottom: 0` pins the content to the
+                      sheet's bottom edge (see phoenix-position below). */}
+                  <Stack.Screen
+                    name="withdraw"
+                    options={{
+                      headerShown: false,
+                      presentation: 'formSheet',
+                      sheetAllowedDetents: [1],
+                      sheetGrabberVisible: false,
+                      sheetCornerRadius: 40,
+                      contentStyle: { bottom: 0, backgroundColor: colors.background },
+                    }}
+                  />
                   {/* Open Phoenix position, as a native form sheet at the
                       large detent. Gesture dismissal is toggled by the screen
                       while SL/TP lines are being dragged on the chart.
@@ -367,6 +411,8 @@ export default function ProtectedAppLayout() {
                 </ComposerProgressProvider>
                 </SandwichComposerProvider>
                 </PodcastGroupProvider>
+                </StockTradeSheetProvider>
+                </SandwichTradeSheetProvider>
                 </PhoenixPositionSheetProvider>
                 </StockDetailProvider>
               </SandwichDetailProvider>

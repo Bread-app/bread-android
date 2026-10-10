@@ -40,13 +40,13 @@ import { LoadErrorState } from "@/components/load-error-state";
 import { ValueSkeleton } from "@/components/value-skeleton";
 import { VerifiedBadge } from "@/components/verified-badge";
 import { DepositSheet, type DepositSheetRef } from "@/components/deposit-sheet";
-import { WithdrawSheet, type WithdrawSheetRef } from "@/components/withdraw-sheet";
 import { settleJupUsdToCash, signAndSendBase64WithResult } from "@/lib/cash";
 import { useCash } from "@/hooks/use-cash";
 import { PnlChart } from "@/components/portfolio-value-chart";
 import { type TakeComposerTarget } from "@/lib/position-takes";
 import { StockDetailSheet, type StockDetailSheetRef } from "@/components/stock-detail-sheet";
 import { AssetLogo } from "@/components/asset-logo";
+import { AnimatedRows } from "@/components/animated-rows";
 import { ClosedPositionRow } from "@/components/closed-position-row";
 import {
   PositionDetailSheet,
@@ -142,6 +142,8 @@ import {
   seedFromBackend,
   type SandwichPosition,
 } from "@/lib/sandwich-positions";
+import { demoClosePerp, demoSandwichExit } from "@/lib/demo-account";
+import { DEMO_BUY_DELAY_MS, isDemoBuyMode, useDemoBuyMode } from "@/lib/demo-buy-mode";
 import {
   isPositiveSmallestUnitAmount,
   isValidDisplayAmount,
@@ -470,7 +472,7 @@ function ClosedHoldingsList({
   }
 
   return (
-    <>
+    <AnimatedRows>
       {/* One compact list row per settled position, sandwiches included:
           title, then when it closed underneath, realized P&L on the right. */}
       {categoryRows.map((position) => (
@@ -486,7 +488,7 @@ function ClosedHoldingsList({
           it occupies the space the next rows are about to fill, so the list
           grows instead of jumping. */}
       {hasMore && loading ? <>{renderSkeletons(1, "Loading more")}</> : null}
-    </>
+    </AnimatedRows>
   );
 }
 
@@ -674,6 +676,17 @@ export function ProfileScreen() {
   >({});
   const [portfolioRefreshKey, setPortfolioRefreshKey] = useState(0);
   const [sandwichRefreshKey, setSandwichRefreshKey] = useState(0);
+  // Demo buys swaps the whole portfolio (paper account ↔ real wallet), so
+  // everything this screen reads is re-read when it flips.
+  const [demoMode] = useDemoBuyMode();
+  const demoModeRef = useRef(demoMode);
+  useEffect(() => {
+    if (demoModeRef.current === demoMode) return;
+    demoModeRef.current = demoMode;
+    setSandwichPositions(null);
+    setPortfolioRefreshKey((value) => value + 1);
+    setSandwichRefreshKey((value) => value + 1);
+  }, [demoMode]);
   const [profileRefreshing, setProfileRefreshing] = useState(false);
   const [refreshArmed, setRefreshArmed] = useState(false);
   const [crossmintOrder, setCrossmintOrder] = useState<CrossmintOrder | null>(
@@ -682,7 +695,6 @@ export function ProfileScreen() {
   const [crossmintEmail, setCrossmintEmail] = useState("");
   const [crossmintAmount, setCrossmintAmount] = useState("");
   const depositSheetRef = useRef<DepositSheetRef>(null);
-  const withdrawSheetRef = useRef<WithdrawSheetRef>(null);
   const cash = useCash();
   const [perpsPositions, setPerpsPositions] = useState<PerpsPosition[]>([]);
   const [perpsLoading, setPerpsLoading] = useState(false);
@@ -987,7 +999,10 @@ export function ProfileScreen() {
 
       // Backend is the canonical source of truth (local wins on a newer
       // updatedAt). A null means unreachable — keep the cache and don't sync.
-      const backendPositions = await getUserPortfolio(user.id).catch(() => null);
+      // Demo mode shows only the paper account's Sandwiches.
+      const backendPositions = isDemoBuyMode()
+        ? []
+        : await getUserPortfolio(user.id).catch(() => null);
       if (!isCurrent || backendPositions === null) return;
 
       const merged = await seedFromBackend(walletAddress, backendPositions, (position) =>
@@ -1439,6 +1454,35 @@ export function ProfileScreen() {
         pnlUsd: position.unrealizedPnl * fraction,
       };
       const receiptId = tradeFx.playPerp({ ...receipt, loading: true });
+      // Demo buys (Settings): the position lives in the paper account, so the
+      // close books there — margin plus PnL back to demo cash.
+      if (isDemoBuyMode()) {
+        try {
+          await new Promise((resolve) => setTimeout(resolve, DEMO_BUY_DELAY_MS));
+          await demoClosePerp({
+            symbol: position.symbol,
+            fraction,
+            exitPrice: receipt.exitPrice ?? position.entryPrice,
+          });
+          tradeFx.updatePerp(receiptId, { ...receipt, loading: false });
+          void getPhoenixAccount()
+            .then((nextAccount) => {
+              setPhoenixAccount(nextAccount);
+              setPortfolioRefreshKey((value) => value + 1);
+            })
+            .catch(() => undefined);
+          void walletStore.refresh();
+        } catch (cause) {
+          tradeFx.dismissPerp(receiptId);
+          showToast({
+            text: cause instanceof Error ? cause.message : `Could not close ${symbol}`,
+            tone: "error",
+          });
+        } finally {
+          setClosingPhoenixSymbol(null);
+        }
+        return;
+      }
       try {
         // The share travels, not a size — the position is measured server-side
         // at build time, so a stale number here can never enlarge the order.
@@ -1486,7 +1530,7 @@ export function ProfileScreen() {
         setClosingPhoenixSymbol(null);
       }
     },
-    [closingPhoenixSymbol, showToast, tradeFx, wallet],
+    [closingPhoenixSymbol, showToast, tradeFx, wallet, walletStore],
   );
 
   /**
@@ -2399,6 +2443,7 @@ export function ProfileScreen() {
    */
   function warmSandwichSell(amount?: string): void {
     if (!selectedTradePosition || sandwichTradeSide !== "sell" || sandwichTrading) return;
+    if (isDemoBuyMode()) return;
     if (selectedTradePosition.legs.some((leg) => leg.kind === "prediction")) return;
     // `amount` is passed by callers that set it in the same render — state has
     // not caught up yet, and warming at the previous size would build a quote
@@ -2509,34 +2554,44 @@ export function ProfileScreen() {
         // Reuse the build touch-down started, when it was for this exact exit.
         // Consumed either way: a build is single-use, and re-awaiting a settled
         // one would resurrect a stale quote.
-        const warmed = warmedSellRef.current;
-        warmedSellRef.current = null;
-        const started = await (warmed?.key === sellWarmKey(position.id, fractionBps)
-          ? warmed.started
-          : startSandwichSell(position.sandwichId, fractionBps));
-        if (started.status !== "needs_signature" || started.transactions.length === 0) {
-          throw new Error(
-            started.status === "failed" ? started.reason : "The sell was not ready to sign.",
-          );
-        }
+        // Demo mode exits against the paper account at the value on screen.
+        const result = isDemoBuyMode()
+          ? await demoSandwichExit({
+              sandwichId: position.sandwichId,
+              fraction: sellFraction,
+              proceedsUsd: (rowValue ?? position.investedUsd ?? 0) * sellFraction,
+            })
+          : await (async () => {
+              const warmed = warmedSellRef.current;
+              warmedSellRef.current = null;
+              const started = await (warmed?.key === sellWarmKey(position.id, fractionBps)
+                ? warmed.started
+                : startSandwichSell(position.sandwichId, fractionBps));
+              if (started.status !== "needs_signature" || started.transactions.length === 0) {
+                throw new Error(
+                  started.status === "failed" ? started.reason : "The sell was not ready to sign.",
+                );
+              }
 
-        const provider = await wallet.getProvider();
-        const signed: string[] = [];
-        for (const unsigned of started.transactions) {
-          const signedPayload = await provider.request({
-            method: "signTransaction",
-            params: { transaction: deserializeTransaction(unsigned) },
-          });
-          signed.push(serializeSignedTransaction(signedPayload.signedTransaction));
-        }
+              const provider = await wallet.getProvider();
+              const signed: string[] = [];
+              for (const unsigned of started.transactions) {
+                const signedPayload = await provider.request({
+                  method: "signTransaction",
+                  params: { transaction: deserializeTransaction(unsigned) },
+                });
+                signed.push(serializeSignedTransaction(signedPayload.signedTransaction));
+              }
 
-        // /submit holds the request open until the bundle confirms on-chain —
-        // seconds, sometimes tens of them. The receipt is already up saying
-        // "selling…", so nothing else needs to narrate the wait.
-        const result = await submitSignedBasketBuy(started.basketRunId, signed);
-        if (result.status === "failed") {
-          throw new Error(result.reason || "The sell did not land. Please try again.");
-        }
+              // /submit holds the request open until the bundle confirms on-chain —
+              // seconds, sometimes tens of them. The receipt is already up saying
+              // "selling…", so nothing else needs to narrate the wait.
+              const submitted = await submitSignedBasketBuy(started.basketRunId, signed);
+              if (submitted.status === "failed") {
+                throw new Error(submitted.reason || "The sell did not land. Please try again.");
+              }
+              return submitted;
+            })();
 
         // A partial exit is settled, not an error: the legs that landed are
         // sold and the rest are still in the wallet. Recording the fraction
@@ -3653,6 +3708,9 @@ export function ProfileScreen() {
 
         {/* index 2 — the holdings / posts list */}
         <View style={styles.holdingsContent}>
+        {/* Rows rise in, fade out and glide into place as the category,
+            Open/Closed view or data changes, instead of snapping. */}
+        <AnimatedRows>
         {/* Checked before the open-holdings skeletons below: settled history
             does not wait on the live balance classification that gates them. */}
         {profileTab === "holdings" && holdingsView === "Closed" ? (
@@ -4176,6 +4234,7 @@ export function ProfileScreen() {
             <Text style={styles.emptyText}>No posts yet</Text>
           </View>
         )}
+        </AnimatedRows>
         </View>
       </ScrollView>
 
@@ -4456,7 +4515,6 @@ export function ProfileScreen() {
         walletAddress={primarySolanaAddress}
         onCheckout={handleDeposit}
       />
-      <WithdrawSheet ref={withdrawSheetRef} />
       <SandwichShareSheet ref={postShareSheetRef} />
       <TopToast toast={toast} />
       {user ? (

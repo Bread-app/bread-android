@@ -112,6 +112,14 @@
     },
     "platforms": [
       "android"
-    ]
+    ],
+    "runtimeVersion": {
+      "policy": "fingerprint"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/6acbe881-0fe1-4d44-a54b-0c2f8d430657",
+      "checkAutomatically": "ON_LOAD",
+      "fallbackToCacheTimeout": 0
+    }
   }
 }

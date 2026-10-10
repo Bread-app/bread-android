@@ -1,3 +1,5 @@
+import { resolveDemoAccountRequest } from './demo-account';
+import { isDemoBuyMode } from './demo-buy-mode';
 import { isDemoMode } from './demo/demo-config';
 import { ONDO_TRADE_UNAVAILABLE_MESSAGE } from './market-hours';
 
@@ -1183,6 +1185,14 @@ async function requestJson<T>(path: string, options: JsonRequestOptions = {}): P
     const { resolveDemoRequest, DEMO_PASSTHROUGH } = await import('./demo/demo-api');
     const demo = await resolveDemoRequest({ method, path, params: options.params, body: options.body });
     if (demo !== DEMO_PASSTHROUGH) return demo as T;
+  }
+
+  // Settings → Demo buys: balances, cost basis and the sell clamp are read from
+  // the on-device paper account instead of the real wallet. Prices, quotes and
+  // everything else still go to the network. See lib/demo-account.ts.
+  if (isDemoBuyMode()) {
+    const demo = await resolveDemoAccountRequest(method, path, options.params);
+    if (demo !== undefined) return demo as T;
   }
 
   const baseUrl = getApiBaseUrl();
@@ -4941,6 +4951,24 @@ export async function getMintDecimals(mint: string): Promise<number | null> {
 // screen prices itself); metadata is effectively static.
 const JUPITER_PRICES_TTL_MS = 12_000;
 const jupiterPricesCache = new Map<string, { payload: unknown; ts: number }>();
+
+/**
+ * Live USD prices for `mints`, from the same source that values wallet rows.
+ * Demo fills price here so a demo holding opens at ~0 PnL, like a real fill.
+ */
+export async function getMarkPricesForMints(mints: string[]): Promise<Record<string, number>> {
+  const unique = [...new Set(mints.filter((mint) => isValidMint(mint)))];
+  if (unique.length === 0) return {};
+  const payload = await getCachedJupiterPrices(unique.slice(0, 100)).catch(() => null);
+  const prices: Record<string, number> = {};
+  if (isRecord(payload) && isRecord(payload.prices)) {
+    for (const mint of unique) {
+      const price = toNumber(payload.prices[mint]);
+      if (price !== null && price > 0) prices[mint] = price;
+    }
+  }
+  return prices;
+}
 
 async function getCachedJupiterPrices(mints: string[]): Promise<unknown> {
   // Key on the mint set (order-independent) so unrelated wallets/sets don't

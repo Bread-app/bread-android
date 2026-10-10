@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { AnimatedRows } from '@/components/animated-rows';
 import { LoadErrorState } from '@/components/load-error-state';
 import { AssetLogo } from '@/components/asset-logo';
 import { Fonts, type ThemeColors } from '@/constants/theme';
@@ -34,6 +35,7 @@ import {
   seedFromBackend,
   type SandwichPosition,
 } from '@/lib/sandwich-positions';
+import { isDemoBuyMode } from '@/lib/demo-buy-mode';
 import { useThemeStore } from '@/lib/theme-store';
 
 const F = Fonts.rounded;
@@ -66,7 +68,7 @@ export function ActivityScreen() {
         if (!user?.id) return cached;
 
         try {
-          const backendPositions = await getUserPortfolio(user.id);
+          const backendPositions = isDemoBuyMode() ? [] : await getUserPortfolio(user.id);
           return await seedFromBackend(walletAddress, backendPositions);
         } catch {
           return cached;
@@ -188,6 +190,7 @@ export function ActivityScreen() {
           </View>
         ) : (
           <View style={styles.listCard}>
+            <AnimatedRows>
             {items.map((item, index) => (
               <View
                 key={item.id}
@@ -203,6 +206,7 @@ export function ActivityScreen() {
                 )}
               </View>
             ))}
+            </AnimatedRows>
           </View>
         )}
       </ScrollView>

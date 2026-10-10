@@ -14,6 +14,8 @@ import {
   createPredictionOrder,
   describeTradeUnavailable,
   executeJupiterOrder,
+  getMarkPricesForMints,
+  getMintDecimals,
   humanizeErrorMessage,
   minSandwichBuyUsdcNative,
   preflightTradeLegs,
@@ -28,6 +30,8 @@ import {
   type Sandwich,
 } from "@/lib/api";
 import { basketQuotedValueUsd } from "@/lib/basket-quote-value";
+import { DemoInsufficientCashError, demoBuySpot, demoOpenPerp } from "@/lib/demo-account";
+import { DEMO_BUY_DELAY_MS, useDemoBuyMode } from "@/lib/demo-buy-mode";
 import { signAndSendBase64, signAndSendBase64WithResult } from "@/lib/cash";
 import {
   entryQuoteAfterRegistration,
@@ -182,6 +186,8 @@ export function useSandwichBuy({
   const [buyAmount, setBuyAmount] = useState(() => initialAmount ?? "");
   const [buying, setBuying] = useState(false);
   const [buyMessage, setBuyMessage] = useState<string | null>(null);
+  // Settings → Demo buys: the pad runs as usual, but nothing is built or signed.
+  const [demoBuys] = useDemoBuyMode();
   /**
    * Build started on touch-down, so the tap itself is only the wallet prompt.
    *
@@ -237,13 +243,15 @@ export function useSandwichBuy({
     enabled: isPerp,
   });
   const spendUsd = isPerp ? perpRisk.cashMovedUsd : numericBuyAmount;
+  // In demo mode `cash` is the paper account's, so this gate still applies.
   const insufficientBalance =
     !cash.loading &&
     Number.isFinite(numericBuyAmount) &&
     numericBuyAmount > 0 &&
     Number.isFinite(spendUsd) &&
     spendUsd > cash.totalCash + Math.max(cash.totalCash * 1e-6, 1e-6);
-  const needsCash = insufficientBalance && !!onRequestAddCash;
+  // Demo cash can't be topped up; the account is reset from Settings instead.
+  const needsCash = insufficientBalance && !!onRequestAddCash && !demoBuys;
   const buyPlan = useMemo(
     () =>
       sandwich && sandwich.venue === "spot" && buyAmountSmallest
@@ -269,7 +277,9 @@ export function useSandwichBuy({
         ? String(minBuyUsd)
         : minBuyUsd.toFixed(2)
       : null;
+  // A demo buy reaches no venue, so no venue minimum applies to it.
   const belowMin =
+    !demoBuys &&
     minBuyNative !== null &&
     !!buyAmountSmallest &&
     isPositiveSmallestUnitAmount(buyAmountSmallest) &&
@@ -277,6 +287,7 @@ export function useSandwichBuy({
   // Phoenix bounds the margin on a perp entry. Gate the button on it so the
   // floor reads as a disabled Open rather than a 422 after the tap.
   const outsidePerpMarginBounds =
+    !demoBuys &&
     isPerp &&
     Number.isFinite(numericBuyAmount) &&
     numericBuyAmount > 0 &&
@@ -287,7 +298,9 @@ export function useSandwichBuy({
     !!wallet &&
     isValidDisplayAmount(buyAmount) &&
     isPositiveSmallestUnitAmount(buyAmountSmallest) &&
-    executableCount > 0 &&
+    // Prediction legs under their $5 floor drop out of the plan, but a demo buy
+    // never executes the plan, so any basket with legs is buyable.
+    (executableCount > 0 || (demoBuys && (sandwich?.legs.length ?? 0) > 0)) &&
     !insufficientBalance &&
     !belowMin &&
     !outsidePerpMarginBounds &&
@@ -400,7 +413,8 @@ export function useSandwichBuy({
   // calls behind a process-wide ~4.5 req/s pacer plus a build and a simulate —
   // quoting more eagerly just queues quotes behind each other.
   useEffect(() => {
-    if (!isPerp || buying) return;
+    // A perp quote reserves a server-side run; a demo buy must never create one.
+    if (!isPerp || buying || demoBuys) return;
     if (!(numericBuyAmount >= MIN_MARGIN_USD && numericBuyAmount <= MAX_MARGIN_USD)) return;
     if (freshPerpQuote(readyQuoteRef.current, perpKey)) return;
 
@@ -412,7 +426,7 @@ export function useSandwichBuy({
     }, PERP_QUOTE_DEBOUNCE_MS);
     quoteDebounceRef.current = timer;
     return () => clearTimeout(timer);
-  }, [buying, ensurePerpQuote, isPerp, leverage, numericBuyAmount, perpKey, stopLossPct]);
+  }, [buying, demoBuys, ensurePerpQuote, isPerp, leverage, numericBuyAmount, perpKey, stopLossPct]);
 
   useEffect(() => () => invalidatePerpQuote(), [invalidatePerpQuote]);
 
@@ -476,7 +490,7 @@ export function useSandwichBuy({
 
   /** Warm the quote on touch-down so the tap is only sign + send. */
   const warmPerpQuote = useCallback(() => {
-    if (!isPerp || buying) return;
+    if (!isPerp || buying || demoBuys) return;
     if (!(numericBuyAmount >= MIN_MARGIN_USD && numericBuyAmount <= MAX_MARGIN_USD)) return;
     if (freshPerpQuote(readyQuoteRef.current, perpKey)) return;
     if (quoteDebounceRef.current) {
@@ -484,7 +498,7 @@ export function useSandwichBuy({
       quoteDebounceRef.current = null;
     }
     void ensurePerpQuote(perpKey, numericBuyAmount, leverage, stopLossPct).catch(() => {});
-  }, [buying, ensurePerpQuote, isPerp, leverage, numericBuyAmount, perpKey, stopLossPct]);
+  }, [buying, demoBuys, ensurePerpQuote, isPerp, leverage, numericBuyAmount, perpKey, stopLossPct]);
 
   const tapPreset = useCallback(
     (value: string) => {
@@ -527,6 +541,101 @@ export function useSandwichBuy({
       !isPositiveSmallestUnitAmount(buyAmountSmallest)
     ) {
       setBuyMessage("Enter a valid USDC amount.");
+      return;
+    }
+
+    // Demo buys: everything the pad validates has run. Instead of building and
+    // signing, the legs fill against the on-device paper account at live
+    // prices, and the position is recorded exactly as a real buy records it —
+    // so it shows up in Holdings, values live, and can be sold.
+    if (demoBuys) {
+      Keyboard.dismiss();
+      setBuying(true);
+      setBuyMessage(null);
+      try {
+        await new Promise((resolve) => setTimeout(resolve, DEMO_BUY_DELAY_MS));
+        if (isPerp) {
+          // A perp Sandwich opens one position per leg, sized off its weight.
+          const legs = perpRisk.legs.filter((leg) => leg.marginUsd > 0);
+          if (legs.length === 0) throw new Error("This sandwich has no legs that can be opened.");
+          for (const leg of legs) {
+            if (!leg.markPrice) throw new Error(`No mark price for ${leg.label} right now.`);
+          }
+          for (const leg of legs) {
+            await demoOpenPerp({
+              symbol: leg.symbol,
+              name: leg.label,
+              iconUri: leg.imageUrl,
+              side: leg.side,
+              leverage,
+              marginUsd: leg.marginUsd,
+              entryPrice: leg.markPrice!,
+            });
+          }
+        } else {
+          const spotLegs = sandwich.legs.filter(
+            (leg): leg is typeof leg & { mint: string } =>
+              leg.type !== "prediction_market" && !!leg.mint && leg.weightBps > 0,
+          );
+          const totalWeight = spotLegs.reduce((sum, leg) => sum + leg.weightBps, 0);
+          if (spotLegs.length === 0 || totalWeight <= 0) {
+            throw new Error("This sandwich has no legs that can be bought yet.");
+          }
+          if (numericBuyAmount > cash.totalCash + 1e-6) throw new DemoInsufficientCashError();
+          const marks = await getMarkPricesForMints(spotLegs.map((leg) => leg.mint));
+          const priced = await Promise.all(
+            spotLegs.map(async (leg) => ({
+              leg,
+              usd: (numericBuyAmount * leg.weightBps) / totalWeight,
+              price: marks[leg.mint] ?? leg.onchainPriceUsd ?? leg.currentPriceUsd ?? leg.priceUsd,
+              decimals: (await getMintDecimals(leg.mint)) ?? 6,
+            })),
+          );
+          const unpriced = priced.find((entry) => !entry.price || entry.price <= 0);
+          if (unpriced) throw new Error(`No price for ${unpriced.leg.symbol ?? unpriced.leg.label} right now.`);
+          const executedLegs: ExecutedSandwichLeg[] = [];
+          for (const { leg, usd, price, decimals } of priced) {
+            const qty = await demoBuySpot({
+              mint: leg.mint,
+              usd,
+              priceUsd: price!,
+              decimals,
+              sandwichId: sandwich.id,
+            });
+            executedLegs.push({
+              kind: "swap",
+              legId: leg.id,
+              mint: leg.mint,
+              inputAmount: String(Math.round(usd * 1_000_000)),
+              outputAmount: BigInt(Math.floor(qty * 10 ** decimals)).toString(),
+              decimals,
+            });
+          }
+          await recordSandwichBuy(walletAddress, sandwich, executedLegs);
+          const updatedPositions = await getStoredSandwichPositions(walletAddress);
+          onPositionUpdated?.(
+            updatedPositions.find((row) => row.sandwichId === sandwich.id) ?? null,
+          );
+        }
+      } catch (error) {
+        setBuying(false);
+        setBuyMessage(getErrorMessage(error));
+        onToast({ text: "Buy stopped", tone: "error" });
+        return;
+      }
+      setBuying(false);
+      void walletStore.refresh();
+      void walletStore.reloadCostBasis();
+      onCelebrate?.({
+        action: "buy",
+        icons: sandwich.legs.map((leg) => leg.imageUrl),
+        label: sandwich.name,
+        amountUsd: numericBuyAmount,
+        sincePnlPct: sandwich.pnlPct,
+        source: sandwich.source,
+        caption: momentReceiptLine(sandwich),
+      });
+      onClose();
       return;
     }
 
@@ -807,6 +916,17 @@ export function useSandwichBuy({
         } else if (started) {
           if (strictTimestamp) {
             stopMessage = started.reason || "This timestamp basket cannot execute atomically right now.";
+            bundleSettled = true;
+          } else if (
+            started.code === "market_closed" ||
+            started.code === "leg_build_failed" ||
+            started.code === "simulation_failed"
+          ) {
+            // All or nothing: the server already checked EVERY leg and one
+            // can't execute right now ("AAOI can't trade right now — opens
+            // Sun 8 PM ET. Nothing was spent."). Retrying leg by leg here would
+            // buy the others alone — the partial fill the server refused.
+            stopMessage = started.reason || "One of this Sandwich's picks can't be bought right now. Nothing was spent.";
             bundleSettled = true;
           } else if (started.code === "payer_underfunded") {
             // The one code that must NOT fall through. Every path below is
@@ -1129,7 +1249,7 @@ export function useSandwichBuy({
   // the $5 minimum is visible against the entered amount. Hidden below the buy
   // minimum (the button shows "Minimum $X" there) and when there's no flooring.
   const predictionNote =
-    !belowMin && predictionFloored
+    !demoBuys && !belowMin && predictionFloored
       ? `${formatUsdShort(predictionBuyUsd)} of ${formatUsdShort(Number(buyAmount))} → prediction market · $5 min`
       : null;
   // `message` stays near the confirm button for wallet/status/skip states.
@@ -1219,7 +1339,9 @@ export function useSandwichBuy({
     buyInputsValid &&
     !livePreview.ready &&
     !livePreview.error;
-  const canBuy = needsCash || (buyInputsValid && !quoteBlocksBuy && !availabilityPending);
+  // A demo buy never reaches a venue, so a venue refusal can't block it.
+  const canBuy =
+    needsCash || (buyInputsValid && (demoBuys || (!quoteBlocksBuy && !availabilityPending)));
 
   /** What one leg receives, at the venue terms currently quoted for it. */
   const quotedLegQuantity = (legId: string): number | null =>
@@ -1315,6 +1437,7 @@ export function useSandwichBuy({
   const warmSpotBuy = () => {
     if (
       isPerp ||
+      demoBuys ||
       buying ||
       needsCash ||
       belowMin ||
@@ -1356,6 +1479,7 @@ export function useSandwichBuy({
    */
   const spotPrebuildReady =
     !isPerp &&
+    !demoBuys &&
     buyInputsValid &&
     !needsCash &&
     !quoteBlocksBuy &&

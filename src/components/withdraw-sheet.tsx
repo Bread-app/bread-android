@@ -1,34 +1,19 @@
-import {
-  BottomSheetBackdrop,
-  BottomSheetModal,
-  BottomSheetScrollView,
-  BottomSheetTextInput,
-  BottomSheetView,
-} from '@gorhom/bottom-sheet';
-import { SheetModal } from '@/components/sheet-modal';
 import { useEmbeddedSolanaWallet } from '@privy-io/expo';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import * as Clipboard from 'expo-clipboard';
-import { GlassView, isGlassEffectAPIAvailable } from 'expo-glass-effect';
 import * as Haptics from 'expo-haptics';
-import React, {
-  forwardRef,
-  useCallback,
-  useEffect,
-  useImperativeHandle,
-  useMemo,
-  useRef,
-  useState,
-} from 'react';
+import { useNavigation } from 'expo-router';
+import React, { useEffect, useState } from 'react';
 import {
-  ActivityIndicator,
   Keyboard,
+  KeyboardAvoidingView,
   Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
-  useWindowDimensions,
 } from 'react-native';
 
 import Animated, {
@@ -37,8 +22,7 @@ import Animated, {
   ZoomIn,
 } from 'react-native-reanimated';
 
-import { CTA_LABEL_FONT, CTA_LABEL_SIZE } from '@/components/side-glass-button';
-import { BlurBackdrop } from '@/components/blur-backdrop';
+import { CtaButton } from '@/components/side-glass-button';
 import { TradeAmountPad } from '@/components/trade-amount-sheet';
 import { Fonts, type ThemeColors } from '@/constants/theme';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
@@ -61,18 +45,17 @@ import {
 import { useWalletStore } from '@/lib/wallet-store';
 import { PressableScale } from '@/components/pressable-scale';
 
-const F = Fonts.rounded;
+/** Mirrors the backend: a flat fee comes out of every withdrawal, $5 minimum. */
+const WITHDRAWAL_FEE_USD = 0.5;
+const MIN_WITHDRAWAL_USD = 5;
 
-export type WithdrawSheetRef = {
-  open: () => void;
-};
+const F = Fonts.rounded;
 
 type Step = 'amount' | 'address' | 'confirm' | 'success';
 
-// iOS 26 Liquid Glass. Resolved once at module load — the API's availability
-// can't change while the app is running, and the flow buttons fall back to a
-// solid `actionPrimary` fill everywhere else.
-const HAS_GLASS = Platform.OS === 'ios' && isGlassEffectAPIAvailable();
+// Withdraw's crimson is reserved for the money-moving CTA (Send). The
+// navigation CTAs (Continue, Done) use the app's primary blue.
+const WITHDRAW_RED = '#D2042D';
 
 const USDC_DECIMALS = 6;
 const BRAND_GREEN = '#35F046';
@@ -97,93 +80,16 @@ function AnimatedCheckmark({ color }: { color: string }) {
   );
 }
 
-type WithdrawFlowButtonProps = {
-  label: string;
-  onPress: () => void;
-  disabled?: boolean;
-  submitting?: boolean;
-  progressLabel?: string | null;
-  textColor?: string;
-};
-
-function WithdrawFlowButton({
-  label,
-  onPress,
-  disabled = false,
-  submitting = false,
-  progressLabel,
-  textColor = '#FFFFFF',
-}: WithdrawFlowButtonProps) {
-  const styles = useThemedStyles(makeStyles);
-  const { colors, scheme } = useThemeStore();
-
-  const content = submitting ? (
-    <View style={styles.submittingRow}>
-      <ActivityIndicator color={textColor} size="small" />
-      <Text style={[styles.withdrawBtnText, { color: textColor }]}>
-        {(progressLabel ?? 'Sending…').toUpperCase()}
-      </Text>
-    </View>
-  ) : (
-    <Text
-      style={[styles.withdrawBtnText, { color: textColor }]}
-      numberOfLines={1}
-      adjustsFontSizeToFit
-      minimumFontScale={0.7}
-    >
-      {label.toUpperCase()}
-    </Text>
-  );
-
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={label}
-      onPress={onPress}
-      disabled={disabled || submitting}
-      style={({ pressed }) => [
-        styles.withdrawBtnWrap,
-        // Solid accent underneath, always: the glass layer is native and paints
-        // nothing when the system judges its material invisible against the
-        // host background, which would leave a correctly-sized blank slot.
-        { backgroundColor: colors.actionPrimary },
-        disabled && styles.withdrawBtnDisabled,
-        pressed && !disabled && !submitting && styles.withdrawBtnPressed,
-      ]}
-    >
-      {HAS_GLASS ? (
-        <GlassView
-          glassEffectStyle="regular"
-          isInteractive
-          tintColor={colors.actionPrimary}
-          // The in-app Light/Dark toggle is independent of the OS appearance,
-          // so the scheme has to be passed explicitly.
-          colorScheme={scheme === 'dark' ? 'dark' : 'light'}
-          style={styles.withdrawBtn}
-        >
-          {content}
-        </GlassView>
-      ) : (
-        <View style={styles.withdrawBtn}>{content}</View>
-      )}
-    </Pressable>
-  );
-}
-
-export const WithdrawSheet = forwardRef<WithdrawSheetRef, object>(function WithdrawSheet(_props, ref) {
-  const sheetRef = useRef<BottomSheetModal>(null);
-  const { height: windowHeight } = useWindowDimensions();
-  // Fixed-height sheet at ~93% of the screen. Dynamic sizing is off so the
-  // amount keypad and the address list both fill the same tall area instead of
-  // hugging their content (which collapsed the deeply-nested flex layouts).
-  // The snap point and the BottomSheetView height MUST be the same pixel value:
-  // a percentage snap ('93%') is measured against the bottom-sheet container
-  // (which is shorter than the full window by the top inset), so it ends up
-  // shorter than a pixel height taken from the full window — and the extra
-  // content (the Continue button at the very bottom) gets clipped off-screen.
-  const sheetHeight = Math.round(windowHeight * 0.93);
-  const snapPoints = useMemo(() => [sheetHeight], [sheetHeight]);
-
+/**
+ * The withdraw flow (amount → address → review → sent). Hosted by the
+ * `/withdraw` route as a native iOS form sheet (`presentation: 'formSheet'` in
+ * `(app)/_layout.tsx`): UIKit owns dimming, drag-to-dismiss and the
+ * parent-stacking effect; this only renders the content. Open it with
+ * `router.navigate('/withdraw')` (navigate, so a double tap can't stack two
+ * sheets). Each presentation mounts fresh, so state starts clean.
+ */
+export function WithdrawFlow({ dismiss }: { dismiss: () => void }) {
+  const navigation = useNavigation();
   const { colors } = useThemeStore();
   const styles = useThemedStyles(makeStyles);
 
@@ -241,7 +147,9 @@ export const WithdrawSheet = forwardRef<WithdrawSheetRef, object>(function Withd
   const cashHasLoaded = walletStore.hasLoaded && cash.hasLoaded;
   const numericAmount = Number(amount);
   const amountValid =
-    Number.isFinite(numericAmount) && numericAmount > 0 && numericAmount <= availableCash + 1e-9;
+    Number.isFinite(numericAmount) &&
+    numericAmount >= MIN_WITHDRAWAL_USD &&
+    numericAmount <= availableCash + 1e-9;
   const amountExceeds = Number.isFinite(numericAmount) && numericAmount > availableCash + 1e-9;
 
   const trimmedAddress = address.trim();
@@ -249,30 +157,16 @@ export const WithdrawSheet = forwardRef<WithdrawSheetRef, object>(function Withd
   const isSelfSend = !!wallet?.address && trimmedAddress === wallet.address;
   const addressReady = addressValid && !isSelfSend;
 
-  useImperativeHandle(ref, () => ({
-    open() {
-      setStep('amount');
-      setAmount('');
-      setMaxSelected(false);
-      setAddress('');
-      setSubmitting(false);
-      setProgressLabel(null);
-      setError(null);
-      setSignature(null);
-      void cash.refresh();
-      if (wallet?.address) {
-        void loadRecentAddresses(wallet.address).then(setRecentAddresses);
-      }
-      sheetRef.current?.present();
-    },
-  }));
+  // Fresh balance every time the sheet opens.
+  useEffect(() => {
+    void cash.refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  const renderBackdrop = useCallback(
-    (props: React.ComponentProps<typeof BottomSheetBackdrop>) => (
-      <BlurBackdrop {...props} />
-    ),
-    [],
-  );
+  // No swipe-to-dismiss while a withdrawal is in flight.
+  useEffect(() => {
+    navigation.setOptions({ gestureEnabled: !submitting });
+  }, [navigation, submitting]);
 
   // Keypad input — drive the amount string from the custom dialpad (same UX as
   // the Buy sheet). Caps the fraction at 2dp (cents) and clears any active Max
@@ -394,293 +288,303 @@ export const WithdrawSheet = forwardRef<WithdrawSheetRef, object>(function Withd
             <Ionicons name="chevron-back" size={20} color={colors.text} />
           </PressableScale>
         ) : (
-          <View style={styles.iconBtn} />
+          <View style={styles.iconSpacer} />
         )}
         <Text style={styles.headerTitle}>{title}</Text>
-        <View style={styles.iconBtn} />
+        {/* Invisible spacer that keeps the title centred — no fill. */}
+        <View style={styles.iconSpacer} />
       </View>
     );
   }
 
   return (
-    <SheetModal
-      ref={sheetRef}
-      snapPoints={snapPoints}
-      enableDynamicSizing={false}
-      enablePanDownToClose={!submitting}
-      keyboardBehavior="interactive"
-      keyboardBlurBehavior="restore"
-      android_keyboardInputMode="adjustResize"
-      backdropComponent={renderBackdrop}
-      handleComponent={null}
-      backgroundStyle={styles.sheetBg}
+    // The keyboard only appears on the address step; padding keeps its
+    // bottom-pinned Continue above it. KeyboardAvoidingView owns its own
+    // paddingBottom (resets it to 0 with no keyboard), so the sheet's insets
+    // live on the inner View.
+    <KeyboardAvoidingView
+      style={styles.keyboardAvoider}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
-      <BottomSheetView style={[styles.sheet, { height: sheetHeight }]}>
-        <View style={styles.handleSpacer} />
+      <View style={styles.sheet}>
 
-        {/* ── Step 1: Amount ── */}
-        {step === 'amount' && (
-          <Animated.View
-            key="step-amount"
-            entering={FadeIn.duration(180)}
-            exiting={FadeOut.duration(120)}
-            style={styles.stepContainer}
-          >
-            {/* Reuse the Buy sheet's amount pad so the custom keypad + layout
-                match exactly. Available balance lives in the top-right corner
-                (the pad's price slot), not a center chip. The pad's body is
-                flex:1 and fills the fixed-height sheet. */}
-            <TradeAmountPad
-              onBack={() => sheetRef.current?.dismiss()}
-              title="Withdraw"
-              subtitleLabel="USDC · Solana"
-              priceLabel={cashHasLoaded ? formatUsd(availableCash) : null}
-              priceLoading={!cashHasLoaded}
-              changeLabel="available"
-              changePositive
-              // Sell-button styling: the default solid confirm button tinted the
-              // sell magenta (matches the stock Sell CTA).
-              accentColor="#D2042D"
-              amount={amount}
-              amountUnitSymbol="$"
-              amountUnitLabel="dollars"
-              // Keep the amount/header area fixed so the center doesn't drift or
-              // bounce when tapped (the flex layout already sizes it to fit).
-              scrollEnabled={false}
-              presets={['25%', '50%', 'Max']}
-              message={amountExceeds ? 'Amount exceeds your balance.' : null}
-              submitting={false}
-              canConfirm={amountValid}
-              confirmLabel="Continue"
-              // Opts the pad's confirm CTA into the iOS 26 Liquid Glass
-              // treatment (the flag name predates the glass rewrite) so
-              // Continue matches the Send/Done buttons below.
-              useGreenGradientButton
-              onTapDigit={tapDigit}
-              onTapPreset={onTapPreset}
-              onSubmit={() => {
-                void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                setStep('address');
-              }}
-            />
-          </Animated.View>
-        )}
-
-        {/* ── Step 2: Address ── */}
-        {step === 'address' && (
-          <Animated.View
-            key="step-address"
-            entering={FadeIn.duration(180)}
-            exiting={FadeOut.duration(120)}
-            style={styles.stepContainer}
-          >
-            {renderHeader('To Address', () => setStep('amount'))}
-
-            {/* Address input pill + scan affordance (matches the reference). */}
-            <View style={styles.addrInputRow}>
-              <View style={styles.toPill}>
-                <Text style={styles.toLabel}>To:</Text>
-                <BottomSheetTextInput
-                  value={address}
-                  onChangeText={(t) => {
-                    setError(null);
-                    setAddress(t);
-                  }}
-                  placeholder="Enter address…"
-                  placeholderTextColor={colors.textTertiary}
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  spellCheck={false}
-                  style={styles.toInput}
-                />
-                {trimmedAddress.length > 0 ? (
-                  <Pressable
-                    onPress={() => {
-                      setError(null);
-                      setAddress('');
-                    }}
-                    hitSlop={8}
-                    style={styles.clearBtn}
-                  >
-                    <Ionicons name="close-circle" size={20} color={colors.textTertiary} />
-                  </Pressable>
-                ) : (
-                  <PressableScale
-                    onPress={() => void handlePaste()}
-                    hitSlop={8}
-                    style={styles.pastePill}
-                  >
-                    <Text style={styles.pastePillText}>Paste</Text>
-                  </PressableScale>
-                )}
-              </View>
-            </View>
-
-            <Text style={styles.listHeading}>Recent</Text>
-
-            {/* Recent destinations (on-device history). */}
-            <BottomSheetScrollView
-              style={styles.addrList}
-              contentContainerStyle={styles.addrListContent}
-              showsVerticalScrollIndicator={false}
-              keyboardShouldPersistTaps="handled"
-            >
-              {recentAddresses.length > 0 ? (
-                recentAddresses.map((r) => (
-                  <PressableScale
-                    key={r.address}
-                    onPress={() => selectRecent(r.address)}
-                    style={styles.recentRow}
-                  >
-                    <View style={styles.recentAvatar}>
-                      <Ionicons name="wallet-outline" size={20} color={colors.textSecondary} />
-                    </View>
-                    <View style={styles.recentInfo}>
-                      <Text style={styles.recentAddr}>{chopAddress(r.address)}</Text>
-                      <Text style={styles.recentSub}>{formatLastUsed(r.lastUsedAt)}</Text>
-                    </View>
-                    <Ionicons name="add" size={24} color={colors.textTertiary} />
-                  </PressableScale>
-                ))
-              ) : (
-                <View style={styles.emptyState}>
-                  <Ionicons name="time-outline" size={30} color={colors.textTertiary} />
-                  <Text style={styles.emptyText}>No recent addresses yet</Text>
-                  <Text style={styles.emptySub}>Addresses you withdraw to will show up here.</Text>
-                </View>
-              )}
-            </BottomSheetScrollView>
-
-            {trimmedAddress.length > 0 && !addressValid ? (
-              <Animated.Text entering={FadeIn} style={styles.error}>
-                Not a valid Solana address.
-              </Animated.Text>
-            ) : isSelfSend ? (
-              <Animated.Text entering={FadeIn} style={styles.error}>
-                Can&apos;t send to your own wallet.
-              </Animated.Text>
-            ) : null}
-
-            <WithdrawFlowButton
-              label="Enter address"
-              onPress={() => {
-                setStep('confirm');
-              }}
-              disabled={!addressReady}
-            />
-          </Animated.View>
-        )}
-
-        {/* ── Step 3: Confirm ── */}
-        {step === 'confirm' && (
-          <Animated.View
-            key="step-confirm"
-            entering={FadeIn.duration(180)}
-            exiting={FadeOut.duration(120)}
-            style={styles.stepContainer}
-          >
-            {renderHeader('Review', submitting ? null : () => setStep('address'))}
-
-            {/* Send icon */}
-            <View style={styles.confirmIconWrap}>
-              <Ionicons name="arrow-up" size={30} color={colors.text} />
-            </View>
-            <Text style={styles.confirmAmount}>{formatUsd(numericAmount)}</Text>
-            <Text style={styles.confirmAmountSub}>USDC · Solana</Text>
-
-            {/* Summary card */}
-            <View style={styles.summaryCard}>
-              <View style={styles.summaryRow}>
-                <Text style={styles.summaryLabel}>To</Text>
-                <Text style={styles.summaryValue}>{chopAddress(trimmedAddress)}</Text>
-              </View>
-              <View style={styles.summaryDivider} />
-              <View style={styles.summaryRow}>
-                <Text style={styles.summaryLabel}>Network</Text>
-                <Text style={styles.summaryValue}>Solana</Text>
-              </View>
-              <View style={styles.summaryDivider} />
-              <View style={styles.summaryRow}>
-                <Text style={styles.summaryLabel}>Fee</Text>
-                <Text style={[styles.summaryValue, { color: colors.positive }]}>Free</Text>
-              </View>
-            </View>
-
-            {/* Push the action to the bottom of the fixed-height sheet. */}
-            <View style={styles.flexSpacer} />
-
-            {error ? (
-              <Animated.Text entering={FadeIn} style={styles.error}>
-                {error}
-              </Animated.Text>
-            ) : null}
-
-            <WithdrawFlowButton
-              label="Send"
-              onPress={() => void handleSend()}
-              submitting={submitting}
-              progressLabel={progressLabel}
-            />
-          </Animated.View>
-        )}
-
-        {/* ── Step 4: Success ── */}
-        {step === 'success' && (
-          <Animated.View
-            key="step-success"
-            entering={FadeIn.duration(250)}
-            style={[styles.stepContainer, styles.successContainer]}
-          >
-            <AnimatedCheckmark color={BRAND_GREEN} />
-
-            <Animated.Text
-              entering={FadeIn.delay(120).duration(200)}
-              style={styles.successTitle}
-            >
-              {formatUsd(numericAmount)} sent
-            </Animated.Text>
-
+          {/* ── Step 1: Amount ── */}
+          {step === 'amount' && (
             <Animated.View
-              entering={FadeIn.delay(180).duration(200)}
-              style={styles.successDetails}
+              key="step-amount"
+              entering={FadeIn.duration(180)}
+              exiting={FadeOut.duration(120)}
+              style={styles.stepContainer}
             >
-              <View style={styles.successDetailRow}>
-                <Text style={styles.successDetailLabel}>To</Text>
-                <Text style={styles.successDetailValue}>{chopAddress(trimmedAddress)}</Text>
-              </View>
-              {signature ? (
-                <>
-                  <View style={styles.successDetailDivider} />
-                  <View style={styles.successDetailRow}>
-                    <Text style={styles.successDetailLabel}>Tx</Text>
-                    <Text style={styles.successDetailValue}>{chopAddress(signature)}</Text>
-                  </View>
-                </>
-              ) : null}
-            </Animated.View>
-
-            <Animated.View entering={FadeIn.delay(260).duration(200)} style={styles.successBtnWrap}>
-              <WithdrawFlowButton
-                label="Done"
-                onPress={() => sheetRef.current?.dismiss()}
+              {/* Reuse the Buy sheet's amount pad so the custom keypad + layout
+                  match exactly. Available balance lives in the top-right corner
+                  (the pad's price slot), not a center chip. The pad's body is
+                  flex:1 and fills the fixed-height sheet. */}
+              <TradeAmountPad
+                onBack={() => dismiss()}
+                title="Withdraw"
+                subtitleLabel="USDC · Solana"
+                priceLabel={cashHasLoaded ? formatUsd(availableCash) : null}
+                priceLoading={!cashHasLoaded}
+                changeLabel="available"
+                changePositive
+                // App primary blue, like every other Continue in the app.
+                accentColor={colors.actionPrimary}
+                amount={amount}
+                amountUnitSymbol="$"
+                amountUnitLabel="dollars"
+                // Keep the amount/header area fixed so the center doesn't drift or
+                // bounce when tapped (the flex layout already sizes it to fit).
+                scrollEnabled={false}
+                presets={['25%', '50%', 'Max']}
+                // Validation sits centred under the amount, only when it applies.
+                amountNote={
+                  amountExceeds
+                    ? 'Amount exceeds your balance'
+                    : numericAmount > 0 && numericAmount < MIN_WITHDRAWAL_USD
+                      ? `Minimum withdrawal ${formatUsd(MIN_WITHDRAWAL_USD)}`
+                      : null
+                }
+                amountNotePlain
+                message={null}
+                submitting={false}
+                canConfirm={amountValid}
+                confirmLabel="Continue"
+                onTapDigit={tapDigit}
+                onTapPreset={onTapPreset}
+                onSubmit={() => {
+                  void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                  setStep('address');
+                }}
               />
             </Animated.View>
-          </Animated.View>
-        )}
-      </BottomSheetView>
-    </SheetModal>
+          )}
+
+          {/* ── Step 2: Address ── */}
+          {step === 'address' && (
+            <Animated.View
+              key="step-address"
+              entering={FadeIn.duration(180)}
+              exiting={FadeOut.duration(120)}
+              style={styles.stepContainer}
+            >
+              {renderHeader('To Address', () => setStep('amount'))}
+
+              {/* Address input pill + scan affordance (matches the reference). */}
+              <View style={styles.addrInputRow}>
+                <View style={styles.toPill}>
+                  <Text style={styles.toLabel}>To:</Text>
+                  <TextInput
+                    value={address}
+                    onChangeText={(t) => {
+                      setError(null);
+                      setAddress(t);
+                    }}
+                    placeholder="Enter address…"
+                    placeholderTextColor={colors.textTertiary}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    spellCheck={false}
+                    style={styles.toInput}
+                  />
+                  {trimmedAddress.length > 0 ? (
+                    <Pressable
+                      onPress={() => {
+                        setError(null);
+                        setAddress('');
+                      }}
+                      hitSlop={8}
+                      style={styles.clearBtn}
+                    >
+                      <Ionicons name="close-circle" size={20} color={colors.textTertiary} />
+                    </Pressable>
+                  ) : (
+                    <PressableScale
+                      onPress={() => void handlePaste()}
+                      hitSlop={8}
+                      style={styles.pastePill}
+                    >
+                      <Text style={styles.pastePillText}>Paste</Text>
+                    </PressableScale>
+                  )}
+                </View>
+              </View>
+
+              <Text style={styles.listHeading}>Recent</Text>
+
+              {/* Recent destinations (on-device history). */}
+              <ScrollView
+                style={styles.addrList}
+                contentContainerStyle={styles.addrListContent}
+                showsVerticalScrollIndicator={false}
+                keyboardShouldPersistTaps="handled"
+              >
+                {recentAddresses.length > 0 ? (
+                  recentAddresses.map((r) => (
+                    <PressableScale
+                      key={r.address}
+                      onPress={() => selectRecent(r.address)}
+                      style={styles.recentRow}
+                    >
+                      <View style={styles.recentAvatar}>
+                        <Ionicons name="wallet-outline" size={20} color={colors.textSecondary} />
+                      </View>
+                      <View style={styles.recentInfo}>
+                        <Text style={styles.recentAddr}>{chopAddress(r.address)}</Text>
+                        <Text style={styles.recentSub}>{formatLastUsed(r.lastUsedAt)}</Text>
+                      </View>
+                      <Ionicons name="add" size={24} color={colors.textTertiary} />
+                    </PressableScale>
+                  ))
+                ) : (
+                  <View style={styles.emptyState}>
+                    <Ionicons name="time-outline" size={30} color={colors.textTertiary} />
+                    <Text style={styles.emptyText}>No recent addresses yet</Text>
+                    <Text style={styles.emptySub}>Addresses you withdraw to will show up here.</Text>
+                  </View>
+                )}
+              </ScrollView>
+
+              {trimmedAddress.length > 0 && !addressValid ? (
+                <Animated.Text entering={FadeIn} style={styles.error}>
+                  Not a valid Solana address.
+                </Animated.Text>
+              ) : isSelfSend ? (
+                <Animated.Text entering={FadeIn} style={styles.error}>
+                  Can&apos;t send to your own wallet.
+                </Animated.Text>
+              ) : null}
+
+              <CtaButton
+                label={addressReady ? 'Continue' : 'Enter address'}
+                color={colors.actionPrimary}
+                onPress={() => {
+                  setStep('confirm');
+                }}
+                disabled={!addressReady}
+              />
+            </Animated.View>
+          )}
+
+          {/* ── Step 3: Confirm ── */}
+          {step === 'confirm' && (
+            <Animated.View
+              key="step-confirm"
+              entering={FadeIn.duration(180)}
+              exiting={FadeOut.duration(120)}
+              style={styles.stepContainer}
+            >
+              {renderHeader('Review', submitting ? null : () => setStep('address'))}
+
+              {/* Send icon */}
+              <View style={styles.confirmIconWrap}>
+                <Ionicons name="arrow-up" size={30} color={colors.text} />
+              </View>
+              <Text style={styles.confirmAmount}>{formatUsd(numericAmount)}</Text>
+              <Text style={styles.confirmAmountSub}>USDC · Solana</Text>
+
+              {/* Summary card */}
+              <View style={styles.summaryCard}>
+                <View style={styles.summaryRow}>
+                  <Text style={styles.summaryLabel}>To</Text>
+                  <Text style={styles.summaryValue}>{chopAddress(trimmedAddress)}</Text>
+                </View>
+                <View style={styles.summaryDivider} />
+                <View style={styles.summaryRow}>
+                  <Text style={styles.summaryLabel}>Network</Text>
+                  <Text style={styles.summaryValue}>Solana</Text>
+                </View>
+                <View style={styles.summaryDivider} />
+                <View style={styles.summaryRow}>
+                  <Text style={styles.summaryLabel}>Fee</Text>
+                  <Text style={styles.summaryValue}>{formatUsd(WITHDRAWAL_FEE_USD)}</Text>
+                </View>
+                <View style={styles.summaryDivider} />
+                <View style={styles.summaryRow}>
+                  <Text style={styles.summaryLabel}>They receive</Text>
+                  <Text style={styles.summaryValue}>
+                    {formatUsd(Math.max(0, numericAmount - WITHDRAWAL_FEE_USD))}
+                  </Text>
+                </View>
+              </View>
+
+              {/* Push the action to the bottom of the fixed-height sheet. */}
+              <View style={styles.flexSpacer} />
+
+              {error ? (
+                <Animated.Text entering={FadeIn} style={styles.error}>
+                  {error}
+                </Animated.Text>
+              ) : null}
+
+              <CtaButton
+                label="Send"
+                color={WITHDRAW_RED}
+                onPress={() => void handleSend()}
+                loading={submitting}
+                loadingLabel={progressLabel ?? 'Sending…'}
+              />
+            </Animated.View>
+          )}
+
+          {/* ── Step 4: Success ── */}
+          {step === 'success' && (
+            <Animated.View
+              key="step-success"
+              entering={FadeIn.duration(250)}
+              style={styles.stepContainer}
+            >
+              <View style={styles.successBody}>
+                <AnimatedCheckmark color={BRAND_GREEN} />
+
+                <Animated.Text
+                  entering={FadeIn.delay(120).duration(200)}
+                  style={styles.successTitle}
+                >
+                  {formatUsd(numericAmount)} sent
+                </Animated.Text>
+
+                <Animated.View
+                  entering={FadeIn.delay(180).duration(200)}
+                  style={styles.successDetails}
+                >
+                  <View style={styles.successDetailRow}>
+                    <Text style={styles.successDetailLabel}>To</Text>
+                    <Text style={styles.successDetailValue}>{chopAddress(trimmedAddress)}</Text>
+                  </View>
+                  {signature ? (
+                    <>
+                      <View style={styles.successDetailDivider} />
+                      <View style={styles.successDetailRow}>
+                        <Text style={styles.successDetailLabel}>Tx</Text>
+                        <Text style={styles.successDetailValue}>{chopAddress(signature)}</Text>
+                      </View>
+                    </>
+                  ) : null}
+                </Animated.View>
+              </View>
+
+              {/* Pinned to the bottom like Send, so Done lands where the thumb
+                  already is. */}
+              <Animated.View entering={FadeIn.delay(260).duration(200)}>
+                <CtaButton
+                  label="Done"
+                  color={colors.actionPrimary}
+                  onPress={() => dismiss()}
+                />
+              </Animated.View>
+            </Animated.View>
+          )}
+      </View>
+    </KeyboardAvoidingView>
   );
-});
+}
 
 const makeStyles = (c: ThemeColors) =>
   StyleSheet.create({
-    sheetBg: {
-      backgroundColor: c.background,
-      borderTopLeftRadius: 28,
-      borderTopRightRadius: 28,
+    keyboardAvoider: {
+      flex: 1,
     },
-    // Grab pill removed app-wide; the spacing it created is kept.
-    handleSpacer: { height: 26 },
     sheet: {
       flex: 1,
       paddingHorizontal: 20,
@@ -705,6 +609,10 @@ const makeStyles = (c: ThemeColors) =>
       alignItems: 'center',
       justifyContent: 'center',
       backgroundColor: c.surfaceAlt,
+    },
+    iconSpacer: {
+      width: 36,
+      height: 36,
     },
     headerTitle: {
       fontFamily: F,
@@ -915,17 +823,13 @@ const makeStyles = (c: ThemeColors) =>
       height: 1,
       backgroundColor: c.border,
     },
-    submittingRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 10,
-    },
 
     // ── Success step ─────────────────────────────────────────────────────────
-    successContainer: {
+    // Fills the space above Done and centres the check, title and receipt.
+    successBody: {
+      flex: 1,
       alignItems: 'center',
       justifyContent: 'center',
-      paddingTop: 40,
     },
     successTitle: {
       fontFamily: F,
@@ -966,10 +870,6 @@ const makeStyles = (c: ThemeColors) =>
       height: 1,
       backgroundColor: c.border,
     },
-    successBtnWrap: {
-      width: '100%',
-      marginTop: 24,
-    },
     successBtn: {
       borderRadius: 18,
       backgroundColor: BRAND_GREEN,
@@ -1006,34 +906,5 @@ const makeStyles = (c: ThemeColors) =>
       fontSize: 13,
       fontWeight: '600',
       textAlign: 'center',
-    },
-    withdrawBtnWrap: {
-      borderRadius: 18,
-      overflow: 'hidden' as const,
-      width: '100%',
-    },
-    withdrawBtnDisabled: {
-      opacity: 0.4,
-    },
-    withdrawBtnPressed: {
-      opacity: 0.8,
-    },
-    withdrawBtn: {
-      width: '100%',
-      // The native glass layer draws its own corners, so the radius lives here
-      // as well as on the wrapper rather than relying on parent clipping.
-      borderRadius: 18,
-      overflow: 'hidden' as const,
-      paddingVertical: 14,
-      alignItems: 'center',
-      justifyContent: 'center',
-      flexDirection: 'row',
-      gap: 10,
-    },
-    withdrawBtnText: {
-      fontFamily: CTA_LABEL_FONT,
-      fontSize: CTA_LABEL_SIZE,
-      color: '#FFFFFF',
-      letterSpacing: 1,
     },
   });

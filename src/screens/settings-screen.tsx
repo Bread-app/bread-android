@@ -1,5 +1,5 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { usePrivy } from '@privy-io/expo';
+import { useEmbeddedSolanaWallet, usePrivy } from '@privy-io/expo';
 import * as Haptics from 'expo-haptics';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
@@ -20,10 +20,14 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Fonts, type ThemeColors } from '@/constants/theme';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
 import { getUserProfile, setShowPositionSize } from '@/lib/api';
+import { DEMO_STARTING_CASH_USD, resetDemoAccount } from '@/lib/demo-account';
+import { useDemoBuyMode } from '@/lib/demo-buy-mode';
+import { clearStoredSandwichPositions } from '@/lib/sandwich-positions';
 import { unregisterCurrentPushToken } from '@/lib/notification-permissions';
 import { useUnreadNotificationCount } from '@/lib/notifications-store';
 import { type ThemeMode, useThemeStore } from '@/lib/theme-store';
 import { useToast } from '@/lib/toast-store';
+import { useWalletStore } from '@/lib/wallet-store';
 
 const F = Fonts.rounded;
 
@@ -175,6 +179,33 @@ export function SettingsScreen() {
     };
   }, [user?.id]);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const [demoBuys, setDemoBuys] = useDemoBuyMode();
+  const solanaWallet = useEmbeddedSolanaWallet();
+  const walletAddress = solanaWallet.wallets?.[0]?.address ?? null;
+  const walletStore = useWalletStore();
+
+  function confirmResetDemo(): void {
+    Alert.alert(
+      'Reset demo account?',
+      `Demo cash goes back to $${DEMO_STARTING_CASH_USD.toFixed(2)} and every demo position is cleared.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Reset',
+          style: 'destructive',
+          onPress: () => {
+            void (async () => {
+              await resetDemoAccount();
+              if (walletAddress) await clearStoredSandwichPositions(walletAddress);
+              void walletStore.refresh();
+              void walletStore.reloadCostBasis();
+              showToast('Demo account reset', 'success');
+            })();
+          },
+        },
+      ],
+    );
+  }
 
   async function openEditProfile(): Promise<void> {
     if (!user?.id || isOpeningProfile) return;
@@ -281,6 +312,21 @@ export function SettingsScreen() {
                 setShowSize(next);
                 void setShowPositionSize(next).catch(() => setShowSize(!next));
               }}
+            />
+          ) : null}
+          <SettingsToggleRow
+            icon="flask"
+            label="Demo buys"
+            hint={`Trade Sandwiches, assets and perps with $${DEMO_STARTING_CASH_USD.toFixed(2)} of demo cash. Your real wallet is hidden while this is on.`}
+            value={demoBuys}
+            onChange={setDemoBuys}
+          />
+          {demoBuys ? (
+            <SettingsRow
+              icon="refresh"
+              label="Reset demo account"
+              onPress={confirmResetDemo}
+              showChevron={false}
             />
           ) : null}
           <SettingsRow

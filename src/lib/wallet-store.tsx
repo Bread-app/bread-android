@@ -12,6 +12,7 @@ import React, {
 
 import { getWalletBalances, getWalletCostBasis, humanizeErrorMessage, type WalletBalanceToken } from '@/lib/api';
 import { loadCostBasisLedger, type CostBasisEntry, type CostBasisLedger } from '@/lib/cost-basis';
+import { isDemoBuyMode, useDemoBuyMode } from '@/lib/demo-buy-mode';
 import { mergeCostBasisLedgers } from '@/lib/onchain-cost-basis';
 
 type WalletStoreValue = {
@@ -68,7 +69,8 @@ const CACHE_PREFIX = 'wallet_balances_v1_';
 const MAX_CACHED_TOKENS = 40;
 
 function cacheKey(address: string): string {
-  return `${CACHE_PREFIX}${address}`;
+  // The demo paper account caches separately, so neither can seed the other.
+  return `${CACHE_PREFIX}${isDemoBuyMode() ? 'demo_' : ''}${address}`;
 }
 
 async function readBalanceCache(address: string): Promise<WalletBalanceToken[] | null> {
@@ -209,7 +211,9 @@ export function WalletStoreProvider({ children }: { children: React.ReactNode })
     // to on-chain swap quantities); the local SecureStore ledger fills the gap
     // for just-made trades the chain hasn't indexed yet.
     const [localLedger, server] = await Promise.all([
-      loadCostBasisLedger(walletAddress),
+      // The local ledger records REAL trades; a demo account's basis is all
+      // in the (paper) server answer.
+      isDemoBuyMode() ? Promise.resolve({}) : loadCostBasisLedger(walletAddress),
       getWalletCostBasis(walletAddress).catch(() => null),
     ]);
     // `solTraded` decides whether the wallet's SOL is a real position or swap
@@ -322,6 +326,23 @@ export function WalletStoreProvider({ children }: { children: React.ReactNode })
     }
     return undefined;
   }, [walletAddress, refresh, reloadCostBasis]);
+
+  // Settings → Demo buys swaps the whole portfolio between the real wallet and
+  // the paper account. Drop what's on screen rather than show one as the other.
+  const [demoMode] = useDemoBuyMode();
+  const demoModeRef = useRef(demoMode);
+  useEffect(() => {
+    if (demoModeRef.current === demoMode) return;
+    demoModeRef.current = demoMode;
+    setTokens([]);
+    setHasLoaded(false);
+    setCostBasis({});
+    freshAddrRef.current = null;
+    lastFetchedRef.current = null;
+    costBasisFetchedRef.current = null;
+    void refresh();
+    void reloadCostBasis();
+  }, [demoMode, refresh, reloadCostBasis]);
 
   const optimisticAdjust = useCallback<WalletStoreValue['optimisticAdjust']>(
     (mint, deltaQty, deltaUsd) => {

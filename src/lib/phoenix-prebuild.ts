@@ -4,6 +4,7 @@ import {
   type PhoenixCloseBuild,
   type PhoenixOrderBuild,
 } from '@/lib/phoenix-api';
+import { isDemoBuyMode } from '@/lib/demo-buy-mode';
 
 /**
  * Speculative Phoenix builds, so the confirm tap is only sign + send.
@@ -73,6 +74,8 @@ function markStillClose(builtMark: number, liveMark: number | null | undefined):
 
 /** Start (or keep) a background build for these exact order inputs. */
 export function prebuildPhoenixOrder(input: OrderInput): void {
+  // A demo trade never reaches Phoenix, so there is nothing to warm.
+  if (isDemoBuyMode()) return;
   const key = orderKey(input);
   if (isFresh(orderEntry, key)) return;
   const promise = buildPhoenixMarketOrder(input);
@@ -112,6 +115,7 @@ export function prebuildPhoenixClose(
   fraction: number,
   subaccountIndex?: number | null,
 ): void {
+  if (isDemoBuyMode()) return;
   const key = closeKey(symbol, fraction, subaccountIndex);
   if (isFresh(closeEntry, key)) return;
   const promise = buildPhoenixClosePosition(symbol, fraction, subaccountIndex);

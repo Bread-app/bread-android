@@ -17,7 +17,9 @@
     "build:dapp-store:local": "eas build -p android --profile dapp-store --local",
     "publish:dapp-store": "node scripts/publish-dapp-store.js",
     "typecheck": "tsc --noEmit",
-    "ios": "expo run:ios"
+    "ios": "expo run:ios",
+    "update:production": "eas update --channel production --platform android",
+    "update:preview": "eas update --channel preview --platform android"
   },
   "dependencies": {
     "@crossmint/client-sdk-react-native-ui": "^1.2.0",
@@ -73,6 +75,7 @@
     "expo-status-bar": "~3.0.9",
     "expo-symbols": "~1.0.8",
     "expo-system-ui": "~6.0.9",
+    "expo-updates": "~29.0.20",
     "expo-web-browser": "~15.0.10",
     "fast-text-encoding": "^1.0.6",
     "react": "19.1.0",

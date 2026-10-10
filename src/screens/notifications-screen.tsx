@@ -5,7 +5,6 @@ import { useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
-  FlatList,
   Image,
   Pressable,
   RefreshControl,
@@ -13,7 +12,10 @@ import {
   Text,
   View,
 } from 'react-native';
+import Animated from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
+
+import { ROW_LAYOUT, rowEntering, useFreshRowIds } from '@/components/animated-rows';
 
 import { Fonts, type ThemeColors } from '@/constants/theme';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
@@ -234,8 +236,13 @@ export function NotificationsScreen() {
     [category, colors.text, router, setCategory, styles],
   );
 
+  // A notification that lands while the inbox is open rises in; rows already
+  // seen (including ones scrolling back into the render window) don't replay.
+  const freshIds = useFreshRowIds(useMemo(() => notifications.map((n) => n.id), [notifications]));
+
   const renderRow = useCallback(
     ({ item }: { item: AppNotification }) => (
+      <Animated.View entering={freshIds.has(item.id) ? rowEntering() : undefined}>
       <Pressable
         accessibilityRole="button"
         onPress={() => onPressRow(item)}
@@ -260,8 +267,9 @@ export function NotificationsScreen() {
           {!item.read ? <View style={styles.unreadDot} /> : null}
         </View>
       </Pressable>
+      </Animated.View>
     ),
-    [colors.icon, onPressRow, styles],
+    [colors.icon, freshIds, onPressRow, styles],
   );
 
   const empty = hydrated && !loading ? (
@@ -280,8 +288,10 @@ export function NotificationsScreen() {
 
   return (
     <SafeAreaView style={styles.page} edges={['top']}>
-      <FlatList
+      <Animated.FlatList
         data={notifications}
+        // Filtering or a row arriving moves the others instead of jumping them.
+        itemLayoutAnimation={ROW_LAYOUT}
         keyExtractor={(item) => item.id}
         renderItem={renderRow}
         ListHeaderComponent={header}

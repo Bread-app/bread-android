@@ -24,6 +24,7 @@ import { getCreatorMeta } from '@/lib/sandwich-feed';
 import { Fonts, type ThemeColors } from '@/constants/theme';
 import { useThemeStore } from '@/lib/theme-store';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
+import { RotatingChevron } from '@/components/rotating-chevron';
 
 const F = Fonts.rounded;
 
@@ -830,11 +831,7 @@ export function PodcastSandwichDetail({
             style={({ pressed }) => [styles.showMoreButton, pressed && styles.showMoreButtonPressed]}
           >
             <Text style={styles.showMoreText}>{summaryExpanded ? 'Show Less' : 'Show More'}</Text>
-            <Ionicons
-              name={summaryExpanded ? 'chevron-up' : 'chevron-down'}
-              size={13}
-              color={colors.textSecondary}
-            />
+            <RotatingChevron up={summaryExpanded} size={13} color={colors.textSecondary} />
           </Pressable>
         </>
       ) : null}

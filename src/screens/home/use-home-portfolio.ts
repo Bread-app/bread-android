@@ -1,13 +1,13 @@
 import { useEmbeddedSolanaWallet, usePrivy } from "@privy-io/expo";
 import { useFocusEffect } from "@react-navigation/native";
+import * as SecureStore from "expo-secure-store";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { useCash } from "@/hooks/use-cash";
 import {
   getPerpSandwichPositions,
-  getUserPortfolioHistory,
+  getUserPnlHistory,
   type PerpSandwichPosition,
-  type PortfolioHistory,
 } from "@/lib/api";
 import { sumHoldingsUsd } from "@/lib/holdings";
 import { hasLivePerpSandwichExposure } from "@/lib/perp-sandwich-visibility";
@@ -17,10 +17,35 @@ import {
   type PhoenixAccountResponse,
 } from "@/lib/phoenix-api";
 import { useWalletStore } from "@/lib/wallet-store";
+import { useDemoBuyMode } from "@/lib/demo-buy-mode";
 
 // The range picker is gone (it only ever drove a chart, which is gone too), so
 // the P&L below the balance is fixed to one window rather than configurable.
 const PNL_RANGE = "7d";
+
+// Last-good P&L per user. The summary walks the trade ledger and reads Phoenix
+// live (several seconds cold), so Home shows the previous figure until the new
+// one lands rather than an empty line.
+function pnlCacheKey(privyUserId: string): string {
+  // SecureStore keys allow only [A-Za-z0-9._-]; Privy ids contain colons.
+  return `home_pnl_${PNL_RANGE}_v1_${privyUserId.replace(/[^A-Za-z0-9._-]/g, "_")}`;
+}
+
+async function readPnlCache(privyUserId: string): Promise<number | null> {
+  try {
+    const raw = await SecureStore.getItemAsync(pnlCacheKey(privyUserId));
+    const value = raw === null ? NaN : Number(raw);
+    return Number.isFinite(value) ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+function writePnlCache(privyUserId: string, value: number): void {
+  SecureStore.setItemAsync(pnlCacheKey(privyUserId), String(value)).catch(() => {
+    // Best-effort: the cache only shortens the blank on the next cold start.
+  });
+}
 
 export type HomePortfolio = {
   walletAddress: string | null;
@@ -38,19 +63,25 @@ export type HomePortfolio = {
  * Everything behind the portfolio hero: the balance (cash + spot + perp
  * collateral) and its P&L over the last 7 days.
  *
- * The history series is still fetched — it is what the P&L is measured
- * against, since the window's opening value comes from its first point. The
- * wallet and cash stores are reconciled on every focus; a stale balance is the
- * one thing people actually open Home to check.
+ * The P&L is trading P&L — realized on everything closed in the window
+ * (Sandwiches, standalone perps including liquidations and fired stops, token
+ * round trips) plus unrealized on what is still open — from the same
+ * `/pnl/history` summary the Profile chart uses. It used to be the change in
+ * the wallet's reconstructed value, which counted deposits and withdrawals as
+ * gains and losses and never saw money inside Phoenix at all: a liquidated
+ * $4 perp read as −$0.05.
  */
 export function useHomePortfolio(): HomePortfolio {
+  // Re-read the perps account when Demo buys flips the portfolio over.
+  const [demoMode] = useDemoBuyMode();
   const { user } = usePrivy();
   const solanaWallet = useEmbeddedSolanaWallet();
   const walletAddress = solanaWallet.wallets?.[0]?.address ?? null;
   const walletStore = useWalletStore();
   const cash = useCash();
 
-  const [history, setHistory] = useState<PortfolioHistory | null>(null);
+  // undefined = not loaded yet; null = no figure (demo, or the read failed).
+  const [pnlUsd, setPnlUsd] = useState<number | null | undefined>(undefined);
   const [refreshKey, setRefreshKey] = useState(0);
   const [phoenixAccount, setPhoenixAccount] = useState<PhoenixAccountResponse | null>(null);
   const [perpSandwichPositions, setPerpSandwichPositions] = useState<PerpSandwichPosition[]>([]);
@@ -68,22 +99,31 @@ export function useHomePortfolio(): HomePortfolio {
   );
 
   useEffect(() => {
-    if (!user?.id) {
-      setHistory({ points: [], changePct: null });
+    if (!user?.id || demoMode) {
+      // A demo account's trades are paper; the server's record is the real one.
+      setPnlUsd(null);
       return;
     }
+    const privyUserId = user.id;
     let current = true;
-    void getUserPortfolioHistory(user.id, PNL_RANGE)
-      .then((next) => {
-        if (current) setHistory(next);
-      })
-      .catch(() => {
-        if (current) setHistory({ points: [], changePct: null });
-      });
+    void readPnlCache(privyUserId).then((cached) => {
+      if (current && cached !== null) setPnlUsd((value) => (value === undefined ? cached : value));
+    });
+    void getUserPnlHistory(privyUserId, PNL_RANGE).then((next) => {
+      if (!current) return;
+      // The client maps a failed read to an empty series; a real answer always
+      // carries one point per day. Keep the last good figure on failure.
+      if (next.points.length === 0) {
+        setPnlUsd((value) => (value === undefined ? null : value));
+        return;
+      }
+      setPnlUsd(next.changeUsd);
+      writePnlCache(privyUserId, next.changeUsd);
+    });
     return () => {
       current = false;
     };
-  }, [refreshKey, user?.id]);
+  }, [demoMode, refreshKey, user?.id]);
 
   useEffect(() => {
     if (!walletAddress) {
@@ -110,7 +150,7 @@ export function useHomePortfolio(): HomePortfolio {
     return () => {
       current = false;
     };
-  }, [refreshKey, walletAddress]);
+  }, [demoMode, refreshKey, walletAddress]);
 
   const ready = walletStore.hasLoaded && cash.hasLoaded && !phoenixLoading;
 
@@ -137,30 +177,7 @@ export function useHomePortfolio(): HomePortfolio {
     ],
   );
 
-  // The stored history is reconstructed from trades, so its last point drifts
-  // from the live balance. Pin the last point to the live total and shift the
-  // rest by the same offset, then read the range's opening value off the front.
-  // The clamp at zero is load-bearing: a large offset can drag an early point
-  // negative, and a portfolio was never worth less than nothing.
-  const adjustedPoints = useMemo(() => {
-    const points = history?.points ?? [];
-    if (!ready || points.length === 0) return points;
-    const reconstructedLast = points[points.length - 1].valueUsd;
-    const offset = liveTotal - reconstructedLast;
-    return points.map((point, index) =>
-      index === points.length - 1
-        ? { ...point, valueUsd: liveTotal }
-        : { ...point, valueUsd: Math.max(0, point.valueUsd + offset) },
-    );
-  }, [history?.points, liveTotal, ready]);
-
-  const periodFirstValue = adjustedPoints[0]?.valueUsd ?? null;
-  const displayedChangePct =
-    ready && periodFirstValue !== null && periodFirstValue > 0
-      ? ((liveTotal - periodFirstValue) / periodFirstValue) * 100
-      : null;
-  const displayedChangeUsd =
-    ready && periodFirstValue !== null ? liveTotal - periodFirstValue : null;
+  const displayedChangeUsd = pnlUsd ?? null;
 
   const refresh = useCallback(async () => {
     await Promise.allSettled([
@@ -178,7 +195,7 @@ export function useHomePortfolio(): HomePortfolio {
     cashError: walletStore.error || cash.error,
     displayedValue: liveTotal,
     displayedChangeUsd,
-    positive: (displayedChangeUsd ?? displayedChangePct ?? 0) >= 0,
+    positive: (displayedChangeUsd ?? 0) >= 0,
     refresh,
   };
 }

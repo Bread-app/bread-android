@@ -15,6 +15,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useSharedValue } from 'react-native-reanimated';
 
+import { AnimatedRows } from '@/components/animated-rows';
 import { StockCard } from '@/components/stock-card';
 import { StockDetailSheet, type StockDetailSheetRef } from '@/components/stock-detail-sheet';
 import { Fonts, type ThemeColors } from '@/constants/theme';
@@ -355,7 +356,9 @@ export function SavedScreen() {
           ) : sandwiches.length === 0 ? (
             <LoadErrorState title="Couldn't load saved sandwiches" onRetry={onRefresh} />
           ) : (
-            feedItems.map((item) =>
+            // Unsaving a card lets it fade out while the rest close the gap.
+            <AnimatedRows>
+            {feedItems.map((item) =>
               item.kind === 'video' ? (
                 <PodcastGroupCard
                   key={item.key}
@@ -376,7 +379,8 @@ export function SavedScreen() {
                   onShare={handleShareSandwich}
                 />
               ),
-            )
+            )}
+            </AnimatedRows>
           )
         ) : savedStockOrder.length === 0 ? (
           <EmptyState
@@ -389,9 +393,12 @@ export function SavedScreen() {
         ) : stocks.length === 0 ? (
           <LoadErrorState title="Couldn't load saved assets" onRetry={onRefresh} />
         ) : (
-          stocks.map((stock) => (
-            <StockCard key={stock.id} stock={stock} onPress={openStock} />
-          ))
+          // Unsaving a row lets it fade out while the rest close the gap.
+          <AnimatedRows>
+            {stocks.map((stock) => (
+              <StockCard key={stock.id} stock={stock} onPress={openStock} />
+            ))}
+          </AnimatedRows>
         )}
       </ScrollView>
 

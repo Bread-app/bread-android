@@ -6,7 +6,6 @@ import { router } from "expo-router";
 import * as Haptics from "expo-haptics";
 
 import { Fonts, type ThemeColors } from "@/constants/theme";
-import { WithdrawSheet, type WithdrawSheetRef } from "@/components/withdraw-sheet";
 import { BalanceCardStack } from "@/components/balance-card-stack";
 import { LikeToBuyCard } from "@/components/like-to-buy-card";
 import { useCash } from "@/hooks/use-cash";
@@ -29,7 +28,6 @@ export function WalletScreen() {
   const styles = useThemedStyles(makeStyles);
   const cash = useCash();
   const walletStore = useWalletStore();
-  const withdrawSheetRef = useRef<WithdrawSheetRef>(null);
   const hasFocusedRef = useRef(false);
   const [refreshing, setRefreshing] = useState(false);
   const [phoenixRefreshKey, setPhoenixRefreshKey] = useState(0);
@@ -72,7 +70,7 @@ export function WalletScreen() {
 
   const openWithdraw = useCallback(() => {
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    withdrawSheetRef.current?.open();
+    router.navigate('/withdraw');
   }, []);
 
   // Like-to-Buy settings live on their own pushed route (with a back button);
@@ -113,7 +111,6 @@ export function WalletScreen() {
         <LikeToBuyCard style={styles.likeToBuyCard} onPress={openLikeToBuy} />
       </ScrollView>
 
-      <WithdrawSheet ref={withdrawSheetRef} />
     </SafeAreaView>
   );
 }

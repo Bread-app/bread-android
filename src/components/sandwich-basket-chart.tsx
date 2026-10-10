@@ -77,6 +77,12 @@ type SandwichBasketChartProps = {
   /** Drops the date / "Holding period" line under the plot. */
   hideFooter?: boolean;
   /**
+   * Horizontal inset for the line inside the plot. Full charts run edge to
+   * edge by default; a host that draws fill markers or the endpoint dot at the
+   * very edge passes room for them so they aren't clipped in half.
+   */
+  insetX?: number;
+  /**
    * UI-thread mirror of the number the chart is displaying. The owner reads
    * these to render its own headline without a render per scrub sample:
    * `scrubValueActive` is 1 while the chart's figure should win over the
@@ -84,6 +90,8 @@ type SandwichBasketChartProps = {
    */
   scrubValue?: SharedValue<number>;
   scrubValueActive?: SharedValue<number>;
+  /** 1 while a finger is on the chart — for owners that show a readout only mid-scrub. */
+  scrubbing?: SharedValue<number>;
 };
 
 export type SandwichChartMarker = {
@@ -280,14 +288,16 @@ export function SandwichBasketChart({
   onGeometry,
   showDotGrid = false,
   hideFooter = false,
+  insetX,
   scrubValue,
   scrubValueActive,
+  scrubbing,
 }: SandwichBasketChartProps) {
   const { colors } = useThemeStore();
   const styles = useThemedStyles(makeStyles);
   const isSpark = variant === 'spark';
   const chartHeight = height ?? CHART_HEIGHT;
-  const paddingX = isSpark ? 10 : 0;
+  const paddingX = insetX ?? (isSpark ? 10 : 0);
   const paddingTop = isSpark ? 18 : 16;
   const paddingBottom = isSpark ? 18 : 8;
   const [points, setPoints] = useState<BasketPoint[]>([]);
@@ -689,8 +699,11 @@ export function SandwichBasketChart({
   }, [chartWidth, chartHeight, points, stats.highest, stats.spread, paddingX, paddingTop, paddingBottom]);
 
   const markerShapes = useMemo(() => {
-    return positionChartMarkers(markers, points, chartPoints, chartWidth, chartHeight);
-  }, [chartHeight, chartPoints, chartWidth, markers, points]);
+    // A zoomed window hides fills from before it; the full view keeps them all.
+    const windowSeconds = rangeSeconds(rangeWindow);
+    const fromMs = isWindowedView && windowSeconds !== null ? (now() - windowSeconds) * 1000 : null;
+    return positionChartMarkers(markers, points, chartPoints, chartWidth, chartHeight, fromMs);
+  }, [chartHeight, chartPoints, chartWidth, isWindowedView, markers, points, rangeWindow]);
 
   const baselineY = useMemo(() => {
     const plotHeight = chartHeight - paddingTop - paddingBottom;
@@ -842,6 +855,7 @@ export function SandwichBasketChart({
       .onTouchesDown((event) => {
         if (event.allTouches.length === 0) return;
         isScrubbing.value = 1;
+        if (scrubbing) scrubbing.value = 1;
         applyScrub(event.allTouches[0].x);
         // Fade the chrome in once per gesture — re-issuing the timing on every
         // move restarts the animation and makes the crosshair flicker.
@@ -852,6 +866,7 @@ export function SandwichBasketChart({
       })
       .onFinalize(() => {
         isScrubbing.value = 0;
+        if (scrubbing) scrubbing.value = 0;
         lastScrubIndex.value = -1;
         scrubActive.value = withTiming(0, { duration: 140 });
         returnText.value = restReturnText.value;
@@ -891,6 +906,7 @@ export function SandwichBasketChart({
     scrubValueActive,
     scrubX,
     scrubY,
+    scrubbing,
     tapHaptic,
   ]);
 
