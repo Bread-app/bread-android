@@ -4,7 +4,6 @@ import * as Notifications from 'expo-notifications';
 import { useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
-  ActivityIndicator,
   Linking,
   Pressable,
   ScrollView,
@@ -15,6 +14,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { SkeletonRows } from '@/components/skeleton-rows';
 import { Fonts, type ThemeColors } from '@/constants/theme';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
 import {
@@ -141,11 +141,25 @@ export function NotificationSettingsScreen() {
     if (!granted) void Linking.openSettings();
   }, []);
 
+  // The header stays up while preferences load, over the shape of the rows
+  // that are coming — not a bare spinner on a blank page.
   if (!preferences) {
     return (
       <SafeAreaView style={styles.page} edges={['top']}>
-        <View style={styles.loadingBox}>
-          <ActivityIndicator color={colors.accentBlue} />
+      <View style={styles.header}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
+          hitSlop={10}
+          onPress={() => router.back()}
+          style={styles.backBtn}>
+          <Ionicons name="chevron-back" size={24} color={colors.text} />
+        </Pressable>
+        <Text style={styles.headerTitle}>Notifications</Text>
+        <View style={styles.backBtn} />
+      </View>
+        <View style={styles.content}>
+          <SkeletonRows count={6} variant="setting" accessibilityLabel="Loading notification settings" />
         </View>
       </SafeAreaView>
     );
@@ -325,7 +339,6 @@ function Row({
 const makeStyles = (c: ThemeColors) =>
   StyleSheet.create({
     page: { flex: 1, backgroundColor: c.background },
-    loadingBox: { flex: 1, alignItems: 'center', justifyContent: 'center' },
     header: {
       flexDirection: 'row',
       alignItems: 'center',

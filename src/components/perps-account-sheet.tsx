@@ -17,6 +17,7 @@ import {
   useWindowDimensions,
 } from 'react-native';
 
+import { SkeletonRows } from '@/components/skeleton-rows';
 import { BlurBackdrop } from '@/components/blur-backdrop';
 import { PressableScale } from '@/components/pressable-scale';
 import { TradeAmountPad } from '@/components/trade-amount-sheet';
@@ -119,7 +120,6 @@ export const PerpsAccountSheet = React.forwardRef<
   PerpsAccountSheetProps & { adapter: PerpsAccountAdapter }
 >(function PerpsAccountSheet({ adapter, onAccountChanged }, ref) {
   const styles = useThemedStyles(makeStyles);
-  const { colors } = useThemeStore();
   const toast = useToast();
   const cash = useCash();
   const { optimisticAdjust } = useWalletStore();
@@ -323,9 +323,7 @@ export const PerpsAccountSheet = React.forwardRef<
     >
       <BottomSheetView style={[styles.sheetContent, { height: height * 0.92 }]}>
         {loading && !account ? (
-          <View style={styles.centered}>
-            <ActivityIndicator size="small" color={colors.textSecondary} />
-          </View>
+          <SkeletonRows count={4} accessibilityLabel="Loading perps account" style={styles.accountSkeleton} />
         ) : !active ? (
           <ActivateBody
             title={adapter.activateCopy.title}
@@ -482,6 +480,7 @@ const makeStyles = (c: ThemeColors) =>
     },
     sheetContent: { paddingHorizontal: 16, paddingBottom: 28, paddingTop: 8 },
     centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+    accountSkeleton: { paddingHorizontal: 4, paddingTop: 12 },
 
     summary: { paddingHorizontal: 4, paddingTop: 4 },
     summaryLabel: {

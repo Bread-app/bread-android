@@ -13,6 +13,7 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { SkeletonRows } from "@/components/skeleton-rows";
 import { AssetLogo } from "@/components/asset-logo";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import * as ImagePicker from "expo-image-picker";
@@ -402,7 +403,7 @@ export function CreateCuratedSandwichScreen({ visible, onClose, userPayload }: P
 
             <ScrollView style={styles.pickerList} keyboardShouldPersistTaps="handled">
               {stocksLoading ? (
-                <ActivityIndicator color={colors.text} style={{ marginTop: 24 }} />
+                <SkeletonRows count={8} accessibilityLabel="Loading stocks" />
               ) : (
                 allStocks.map((stock) => {
                   const isSelected = selected.some((s) => s.stock.id === stock.id);

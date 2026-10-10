@@ -1,7 +1,8 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
 import React from "react";
-import { ActivityIndicator, Image, Pressable, StyleSheet, Text, View } from "react-native";
+import { Image, Pressable, StyleSheet, Text, View } from "react-native";
 
+import { SkeletonRows } from "@/components/skeleton-rows";
 import { Fonts, type ThemeColors } from "@/constants/theme";
 import { useThemedStyles } from "@/hooks/use-themed-styles";
 import { getSandwichTakes, type PositionTake } from "@/lib/api";
@@ -71,7 +72,6 @@ export function PositionTakesSection({
   onPressAuthor?: (userId: string) => void;
 }) {
   const styles = useThemedStyles(makeStyles);
-  const { colors } = useThemeStore();
   const [takes, setTakes] = React.useState<PositionTake[] | null>(null);
   const [cursor, setCursor] = React.useState<string | null>(null);
   const [loadingMore, setLoadingMore] = React.useState(false);
@@ -95,7 +95,7 @@ export function PositionTakesSection({
   return (
     <View style={styles.section}>
       {takes === null ? (
-        <ActivityIndicator size="small" color={colors.textTertiary} style={styles.loader} />
+        <SkeletonRows count={2} variant="comment" accessibilityLabel="Loading takes" />
       ) : (
         <>
           {takes.map((take) => (
@@ -128,7 +128,6 @@ export function PositionTakesSection({
 const makeStyles = (c: ThemeColors) =>
   StyleSheet.create({
     section: { paddingHorizontal: 20, paddingTop: 24, gap: 18 },
-    loader: { alignSelf: "flex-start" },
     row: { gap: 6 },
     avatar: { width: 30, height: 30, borderRadius: 15, backgroundColor: c.surfaceAlt },
     avatarFallback: { alignItems: "center", justifyContent: "center" },

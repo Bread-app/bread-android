@@ -8,9 +8,10 @@ import React, {
   useRef,
   useState,
 } from 'react';
-import { ActivityIndicator, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 
+import { SkeletonRows } from '@/components/skeleton-rows';
 import { AssetLogo } from '@/components/asset-logo';
 import { BlurBackdrop } from '@/components/blur-backdrop';
 import { Fonts, Motion, type ThemeColors } from '@/constants/theme';
@@ -147,9 +148,7 @@ export const AssetActivitySheet = React.forwardRef<
         ) : null}
 
         {rows === null ? (
-          <View style={styles.centered}>
-            <ActivityIndicator size="small" color={colors.textSecondary} />
-          </View>
+          <SkeletonRows count={4} accessibilityLabel={`Loading ${symbol} trades`} />
         ) : rows.length === 0 ? (
           <View style={styles.centered}>
             <Ionicons name="receipt-outline" size={26} color={colors.textTertiary} />

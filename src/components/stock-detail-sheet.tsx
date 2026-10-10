@@ -2,6 +2,7 @@ import { BottomSheetBackdrop, BottomSheetModal, BottomSheetScrollView } from '@g
 import { SheetModal } from '@/components/sheet-modal';
 import { isGlassEffectAPIAvailable } from 'expo-glass-effect';
 import { LinearGradient } from 'expo-linear-gradient';
+import { SkeletonRows } from '@/components/skeleton-rows';
 import { NotificationTweet } from '@/components/notification-tweet';
 import React, {
   forwardRef,
@@ -14,7 +15,7 @@ import React, {
   useState,
   useSyncExternalStore,
 } from 'react';
-import { AppState, ActivityIndicator, Image, Keyboard, Linking, Platform, Pressable, ScrollView, Share, StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
+import { AppState, Image, Keyboard, Linking, Platform, Pressable, ScrollView, Share, StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useEmbeddedSolanaWallet, usePrivy } from '@privy-io/expo';
@@ -671,7 +672,6 @@ function SandwichesSection({
   onOpenSandwich: (sandwich: Sandwich, options?: { showComments?: boolean }) => void;
 }) {
   const contentStyles = useThemedStyles(makeContentStyles);
-  const { colors } = useThemeStore();
   const { user } = usePrivy();
   const [anonymousId, setAnonymousId] = useState<string | null>(null);
   const [localLikes, setLocalLikes] = useState<Record<string, boolean>>({});
@@ -724,9 +724,7 @@ function SandwichesSection({
 
   if (loading && sandwiches.length === 0) {
     return (
-      <View style={contentStyles.tabSpinner}>
-        <ActivityIndicator color={colors.textTertiary} size="small" />
-      </View>
+      <SkeletonRows count={3} accessibilityLabel="Loading sandwiches" style={contentStyles.tabSkeleton} />
     );
   }
   if (sandwiches.length === 0) {
@@ -778,9 +776,7 @@ function HoldersSection({
 
   if (loading && holders.length === 0) {
     return (
-      <View style={contentStyles.tabSpinner}>
-        <ActivityIndicator color={colors.textTertiary} size="small" />
-      </View>
+      <SkeletonRows count={3} accessibilityLabel="Loading holders" style={contentStyles.tabSkeleton} />
     );
   }
   if (holders.length === 0) {
@@ -900,9 +896,7 @@ function PerpHoldersSection({
 
   if (loading && holders.length === 0) {
     return (
-      <View style={contentStyles.tabSpinner}>
-        <ActivityIndicator color={colors.textTertiary} size="small" />
-      </View>
+      <SkeletonRows count={3} accessibilityLabel="Loading perp holders" style={contentStyles.tabSkeleton} />
     );
   }
   if (holders.length === 0) {
@@ -3368,9 +3362,8 @@ const makeContentStyles = (c: ThemeColors) => {
       fontFamily: F,
       marginTop: 16,
     },
-    tabSpinner: {
-      paddingTop: 32,
-      alignItems: 'center',
+    tabSkeleton: {
+      paddingTop: 8,
     },
     newsRow: {
       flexDirection: 'row',

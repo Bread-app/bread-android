@@ -6,6 +6,7 @@ import {
 } from '@gorhom/bottom-sheet';
 import { SheetModal } from '@/components/sheet-modal';
 
+import { ValueSkeleton } from '@/components/value-skeleton';
 import { BlurBackdrop } from '@/components/blur-backdrop';
 import { GlassSheetSurface } from '@/components/glass-sheet-surface';
 import { PressableScale } from '@/components/pressable-scale';
@@ -580,9 +581,8 @@ export function DepositFlow({
               innerEyesOptions={{ borderRadius: QR_PIECE * 1.3, color: colors.text }}
             />
           ) : (
-            <View style={s.qrPlaceholder}>
-              <ActivityIndicator color={colors.textSecondary} />
-            </View>
+            // The code's own footprint, so the address lands in place.
+            <ValueSkeleton width={190} height={190} radius={22} accessibilityLabel="Loading deposit address" />
           )}
         </View>
 

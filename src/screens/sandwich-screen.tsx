@@ -54,6 +54,7 @@ import Animated, {
 } from "react-native-reanimated";
 import Svg, { Path, Rect } from "react-native-svg";
 import { Gesture, GestureDetector, GestureHandlerRootView } from "react-native-gesture-handler";
+import { SkeletonRows } from "@/components/skeleton-rows";
 import { ScaleRuler } from "@/components/scale-ruler";
 import { LegTapHint } from "@/components/leg-tap-hint";
 import { LoadErrorState } from "@/components/load-error-state";
@@ -3784,9 +3785,7 @@ function LegPickerOverlay({
           >
             {category === "stocks" ? (
               stocksLoading ? (
-                <View style={styles.composerLoading}>
-                  <ActivityIndicator color={colors.icon} />
-                </View>
+                <SkeletonRows count={6} variant="tile" accessibilityLabel="Loading stocks" />
               ) : stocks.length === 0 ? (
                 <Text style={styles.composerEmptyHint}>
                   {query.trim()
@@ -3807,9 +3806,7 @@ function LegPickerOverlay({
               )
             ) : category === "perps" ? (
               perpsLoading ? (
-                <View style={styles.composerLoading}>
-                  <ActivityIndicator color={colors.icon} />
-                </View>
+                <SkeletonRows count={6} variant="tile" accessibilityLabel="Loading perp markets" />
               ) : visiblePerpAssets.length === 0 ? (
                 <Text style={styles.composerEmptyHint}>
                   {query.trim() ? "No perp assets found." : "No perp markets available right now."}
@@ -5299,9 +5296,11 @@ export function SandwichDetailScreen() {
                 // hasn't failed yet — showing "unavailable" over a load that is
                 // about to succeed is what made a cold entry look broken.
                 idParam && !recoveryFailed ? (
-                  <View style={styles.stateCard}>
-                    <ActivityIndicator color={colors.textTertiary} />
-                  </View>
+                  // The post and its legs, in outline, while the refetch lands.
+                  <>
+                    <SkeletonRows count={1} variant="card" accessibilityLabel="Loading sandwich" />
+                    <SkeletonRows count={3} accessibilityLabel="Loading sandwich legs" />
+                  </>
                 ) : (
                   <View style={styles.stateCard}>
                     <Text style={styles.stateTitle}>Sandwich unavailable</Text>
@@ -6780,9 +6779,7 @@ export function SandwichScreen() {
               {searchQuery.trim().length >= 2 ? (
                 <View style={styles.searchOverlay}>
                   {searchLoading ? (
-                    <View style={styles.searchCenter}>
-                      <ActivityIndicator color={colors.icon} size="small" />
-                    </View>
+                    <SkeletonRows count={4} accessibilityLabel="Searching people" />
                   ) : searchResults.length === 0 ? (
                     <View style={styles.searchCenter}>
                       <Text style={styles.searchEmptyText}>No users found</Text>
@@ -10564,11 +10561,6 @@ const makeStyles = (c: ThemeColors) => {
     fontSize: 15,
     fontWeight: "700",
     paddingVertical: 0,
-  },
-  composerLoading: {
-    paddingVertical: 30,
-    alignItems: "center",
-    justifyContent: "center",
   },
   composerEmptyHint: {
     color: c.textSecondary,

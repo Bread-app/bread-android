@@ -33,6 +33,7 @@ import {
 import { useReducedMotion } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { SkeletonRows } from '@/components/skeleton-rows';
 import { BlurBackdrop } from '@/components/blur-backdrop';
 import { HandleText } from '@/components/handle-text';
 import { Fonts, type ThemeColors } from '@/constants/theme';
@@ -426,9 +427,12 @@ export const SandwichCommentsSheet = forwardRef<SandwichCommentsSheetRef, Props>
           </View>
 
           {loading ? (
-            <View style={[styles.centerState, { paddingBottom: composerHeight }]}>
-              <ActivityIndicator color={colors.accentBlue} />
-            </View>
+            <SkeletonRows
+              count={5}
+              variant="comment"
+              accessibilityLabel="Loading comments"
+              style={[styles.commentsSkeleton, { paddingBottom: composerHeight }]}
+            />
           ) : error ? (
             <View style={[styles.centerState, { paddingBottom: composerHeight }]}>
               <Ionicons name="chatbubble-ellipses-outline" size={30} color={colors.textTertiary} />
@@ -510,6 +514,7 @@ function makeStyles(c: ThemeColors) {
     retryText: { color: c.text, fontFamily: Fonts.rounded, fontWeight: '800', fontSize: 13 },
     commentsList: { flex: 1 },
     listContent: { paddingHorizontal: 18, paddingTop: 8 },
+    commentsSkeleton: { flex: 1, paddingHorizontal: 18, paddingTop: 8 },
     emptyList: { flexGrow: 1 },
     emptyState: { flex: 1, alignItems: 'center', gap: 8, paddingHorizontal: 30, paddingTop: 72 },
     emptyTitle: { color: c.text, fontFamily: Fonts.rounded, fontSize: 15, fontWeight: '800' },

@@ -4,7 +4,6 @@ import { useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -15,6 +14,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useSharedValue } from 'react-native-reanimated';
 
+import { SkeletonRows } from '@/components/skeleton-rows';
 import { AnimatedRows } from '@/components/animated-rows';
 import { StockCard } from '@/components/stock-card';
 import { StockDetailSheet, type StockDetailSheetRef } from '@/components/stock-detail-sheet';
@@ -352,7 +352,7 @@ export function SavedScreen() {
               subtitle="Tap the star on any sandwich to save it here."
             />
           ) : sandwichesLoading ? (
-            <LoadingState />
+            <LoadingState variant="card" />
           ) : sandwiches.length === 0 ? (
             <LoadErrorState title="Couldn't load saved sandwiches" onRetry={onRefresh} />
           ) : (
@@ -389,7 +389,7 @@ export function SavedScreen() {
             subtitle="Tap the star on any asset to save it here."
           />
         ) : stocksLoading ? (
-          <LoadingState />
+          <LoadingState variant="row" />
         ) : stocks.length === 0 ? (
           <LoadErrorState title="Couldn't load saved assets" onRetry={onRefresh} />
         ) : (
@@ -446,13 +446,14 @@ function TabButton({
   );
 }
 
-function LoadingState() {
-  const styles = useThemedStyles(makeStyles);
-  const { colors } = useThemeStore();
+/** The saved list's own shape while it loads — cards for sandwiches, rows for assets. */
+function LoadingState({ variant }: { variant: 'card' | 'row' }) {
   return (
-    <View style={styles.centerState}>
-      <ActivityIndicator color={colors.textSecondary} />
-    </View>
+    <SkeletonRows
+      count={variant === 'card' ? 3 : 5}
+      variant={variant}
+      accessibilityLabel={variant === 'card' ? 'Loading saved sandwiches' : 'Loading saved assets'}
+    />
   );
 }
 

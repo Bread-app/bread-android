@@ -15,6 +15,7 @@ import {
 import Animated from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { SkeletonRows } from '@/components/skeleton-rows';
 import { ROW_LAYOUT, rowEntering, useFreshRowIds } from '@/components/animated-rows';
 
 import { Fonts, type ThemeColors } from '@/constants/theme';
@@ -281,9 +282,7 @@ export function NotificationsScreen() {
       </Text>
     </View>
   ) : (
-    <View style={styles.emptyBox}>
-      <ActivityIndicator color={colors.accentBlue} />
-    </View>
+    <SkeletonRows count={7} accessibilityLabel="Loading notifications" style={styles.skeleton} />
   );
 
   return (
@@ -377,6 +376,7 @@ const makeStyles = (c: ThemeColors) =>
     unreadDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: c.accentBlue },
     footer: { paddingVertical: 20 },
     emptyBox: { alignItems: 'center', gap: 8, paddingTop: 80, paddingHorizontal: 40 },
+    skeleton: { paddingHorizontal: 18 },
     emptyTitle: { fontFamily: F, fontWeight: '800', fontSize: 16, color: c.text },
     emptyBody: {
       fontFamily: F,

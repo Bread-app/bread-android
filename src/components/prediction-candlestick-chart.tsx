@@ -1,9 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Svg, { Circle, Line, Path, Rect } from 'react-native-svg';
 import * as Haptics from 'expo-haptics';
 
+import { WavingLineSkeleton } from '@/components/waving-line-skeleton';
 import { Fonts, type ThemeColors } from '@/constants/theme';
 import { useThemeStore } from '@/lib/theme-store';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
@@ -256,9 +257,7 @@ export function PredictionCandlestickChart({
         onLayout={(e) => setChartWidth(e.nativeEvent.layout.width)}
       >
         {loading ? (
-          <View style={styles.center}>
-            <ActivityIndicator color={colors.textTertiary} size="small" />
-          </View>
+          <WavingLineSkeleton height={CHART_HEIGHT} />
         ) : candles.length === 0 ? (
           <View style={styles.center}>
             <Text style={styles.empty}>No price history yet</Text>

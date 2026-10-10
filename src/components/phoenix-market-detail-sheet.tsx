@@ -1,3 +1,4 @@
+import { WavingLineSkeleton } from '@/components/waving-line-skeleton';
 import { NotificationTweet } from '@/components/notification-tweet';
 import { BottomSheetBackdrop, BottomSheetModal, BottomSheetScrollView } from '@gorhom/bottom-sheet';
 import { SheetModal } from '@/components/sheet-modal';
@@ -12,7 +13,6 @@ import React, {
   useState,
 } from 'react';
 import {
-  ActivityIndicator,
   Dimensions,
   Keyboard,
   Platform,
@@ -1494,7 +1494,7 @@ const PhoenixMarketDetailSheetContent = forwardRef<
                       </Pressable>
                     </>
                   ) : (
-                    <ActivityIndicator size="small" color={colors.textSecondary} />
+                    <WavingLineSkeleton height={chartHeight} style={styles.chartSkeleton} />
                   )}
                 </View>
               ) : (
@@ -2025,6 +2025,7 @@ const makeStyles = (c: ThemeColors) =>
     tfText: { fontFamily: F, color: c.textTertiary, fontSize: 14, fontWeight: '700' },
     tfTextActive: { color: c.text, fontSize: 15, fontWeight: '900' },
     chartLoading: { alignItems: 'center', justifyContent: 'center' },
+    chartSkeleton: { alignSelf: 'stretch' },
 
     tabBarContainer: { paddingTop: 10 },
     tabBarRow: {

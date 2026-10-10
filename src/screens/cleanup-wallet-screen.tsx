@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { ValueSkeleton } from '@/components/value-skeleton';
 import { Fonts, type ThemeColors } from '@/constants/theme';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
 import {
@@ -131,7 +132,11 @@ export function CleanupWalletScreen() {
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <View style={styles.hero}>
           {loading ? (
-            <ActivityIndicator color={colors.text} />
+            // The count and its caption, as bars, where they will land.
+            <>
+              <ValueSkeleton width={56} height={40} radius={10} accessibilityLabel="Counting empty accounts" />
+              <ValueSkeleton width={220} height={14} />
+            </>
           ) : (
             <>
               <Text style={styles.heroAmount}>{count}</Text>

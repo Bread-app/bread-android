@@ -1,6 +1,5 @@
 import React, { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
   Dimensions,
   FlatList,
   Image,
@@ -53,6 +52,7 @@ import {
   type SocialUser,
   type Stock,
 } from '@/lib/api';
+import { SkeletonRows } from '@/components/skeleton-rows';
 import { Fonts, type ThemeColors } from '@/constants/theme';
 import {
   HoldingsCategorySwitch,
@@ -412,7 +412,6 @@ function UserProfileView({
   asRoute = false,
 }: Props & { asRoute?: boolean }) {
   const styles = useThemedStyles(makeStyles);
-  const { colors } = useThemeStore();
   const insets = useSafeAreaInsets();
   const screenWidth = Dimensions.get('window').width;
   const [closingForNativeZoom, setClosingForNativeZoom] = useState(false);
@@ -1539,7 +1538,8 @@ function UserProfileView({
   const listFooter = contentRows.length === 0
     ? emptyComponent
     : holdingsActive && holdingsView === 'Closed' && closedLoading
-      ? <View style={styles.loadingMore}><ActivityIndicator color={colors.text} /></View>
+      // One placeholder row where the next page lands, as on your own profile.
+      ? <SkeletonRows count={1} accessibilityLabel="Loading more" style={styles.closedSkeleton} />
       : null;
 
   const loadMoreClosed = useCallback(() => {
@@ -1779,7 +1779,7 @@ const makeStyles = (c: ThemeColors) => StyleSheet.create({
     paddingTop: 22,
     paddingBottom: 6,
   },
-  loadingMore: { paddingVertical: 20, alignItems: 'center', justifyContent: 'center' },
+  closedSkeleton: { paddingHorizontal: 20 },
   emptyText: { color: c.textSecondary, fontSize: 15, fontWeight: '600', fontFamily: F },
   holdingsRetryBtn: {
     marginTop: 14,

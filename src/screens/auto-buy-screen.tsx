@@ -28,6 +28,7 @@ import { useEmbeddedSolanaWallet, useSigners } from "@privy-io/expo";
 import { useFocusEffect } from "@react-navigation/native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { SkeletonRows } from "@/components/skeleton-rows";
 import { BlurBackdrop } from "@/components/blur-backdrop";
 import { BalanceCardStack } from "@/components/balance-card-stack";
 import { LikeToBuyCard } from "@/components/like-to-buy-card";
@@ -399,8 +400,8 @@ export function AutoBuyScreen({ showBackButton = true }: { showBackButton?: bool
 
   if (loading || !config) {
     return (
-      <View style={[styles.screen, styles.center]}>
-        <ActivityIndicator color={colors.accent} />
+      <View style={[styles.screen, styles.loadingBody]}>
+        <SkeletonRows count={5} variant="setting" accessibilityLabel="Loading Like to Buy settings" />
       </View>
     );
   }
@@ -783,6 +784,7 @@ const makeStyles = (c: ThemeColors) =>
   StyleSheet.create({
     screen: { flex: 1, backgroundColor: c.background },
     center: { alignItems: "center", justifyContent: "center" },
+    loadingBody: { paddingHorizontal: 20, paddingTop: 72 },
     header: {
       flexDirection: "row",
       alignItems: "center",

@@ -4,7 +4,6 @@ import * as Haptics from 'expo-haptics';
 import { router as expoRouter, useNavigation } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
   Platform,
   Pressable,
   ScrollView,
@@ -17,6 +16,7 @@ import {
 } from 'react-native';
 import Svg, { Line as SvgLine, Path as SvgPath } from 'react-native-svg';
 
+import { WavingLineSkeleton } from '@/components/waving-line-skeleton';
 import { AssetLogo } from '@/components/asset-logo';
 import { AssetShareSheet, type AssetShareSheetRef } from '@/components/asset-share-sheet';
 import { MIN_CLOSE_PERCENT, PhoenixClosePad } from '@/components/phoenix-close-pad';
@@ -615,7 +615,7 @@ export function PhoenixPositionSheet({
                       </Pressable>
                     </>
                   ) : (
-                    <ActivityIndicator size="small" color={colors.textSecondary} />
+                    <WavingLineSkeleton height={300} style={styles.chartSkeleton} />
                   )}
                 </View>
               ) : (
@@ -1057,6 +1057,7 @@ const makeStyles = (c: ThemeColors) =>
     tfText: { fontFamily: F, color: c.textTertiary, fontSize: 14, fontWeight: '700' },
     tfTextActive: { color: c.text, fontSize: 15, fontWeight: '900' },
     chartLoading: { height: 300, alignItems: 'center', justifyContent: 'center', gap: 10 },
+    chartSkeleton: { alignSelf: 'stretch' },
     chartError: { fontFamily: F, color: c.textSecondary, fontSize: 13, fontWeight: '700' },
     retryButton: {
       minWidth: 88,

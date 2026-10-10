@@ -4,7 +4,6 @@ import * as Haptics from 'expo-haptics';
 import { Stack, useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
   ScrollView,
   StyleSheet,
   Text,
@@ -12,6 +11,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { SkeletonRows } from '@/components/skeleton-rows';
 import type { CardSocial, Sandwich, SandwichLeg } from '@/lib/api';
 import {
   appUserPayloadFromPrivyUser,
@@ -543,7 +543,7 @@ export function PodcastSandwichScreen() {
         {/* A refetch is in flight whenever the route carries a sourceId and
             hasn't failed — don't declare the episode gone mid-load. */}
         {sourceId && !recoveryFailed ? (
-          <ActivityIndicator />
+          <SkeletonRows count={3} variant="card" accessibilityLabel="Loading episode" style={styles.loadingCards} />
         ) : (
           <Text style={styles.emptyText}>This episode is no longer loaded.</Text>
         )}
@@ -795,6 +795,7 @@ const makeStyles = (c: ThemeColors) =>
   StyleSheet.create({
     root: { flex: 1, backgroundColor: c.background },
     content: { paddingHorizontal: 14 },
+    loadingCards: { alignSelf: 'stretch' },
     empty: {
       flex: 1,
       alignItems: 'center',
