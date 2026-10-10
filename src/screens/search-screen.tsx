@@ -27,10 +27,6 @@ import { useThemedStyles } from "@/hooks/use-themed-styles";
 import { FollowButton } from "@/components/follow-button";
 import { LoadingStockList } from "@/components/loading-stock-list";
 import { StockCard } from "@/components/stock-card";
-import {
-  StockDetailSheet,
-  type StockDetailSheetRef,
-} from "@/components/stock-detail-sheet";
 import { useStockDetail } from "@/lib/stock-detail-store";
 import type { ZoomSourceRect } from "@/lib/zoom-transition";
 import { PhoenixMarketCard } from "@/components/phoenix-market-card";
@@ -350,7 +346,6 @@ export function SearchResults({
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
   const [userOpen, setUserOpen] = useState(false);
 
-  const stockSheetRef = useRef<StockDetailSheetRef>(null);
   const { open: openStockRoute } = useStockDetail();
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const assetDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -550,12 +545,6 @@ export function SearchResults({
     };
   }, [query, active, pastedMint, user?.id]);
 
-  // Close the detail sheets whenever search closes.
-  useEffect(() => {
-    if (!active) {
-      stockSheetRef.current?.close();
-    }
-  }, [active]);
 
   const q = query.trim().toLowerCase();
 
@@ -663,28 +652,26 @@ export function SearchResults({
   );
 
   /**
-   * Perp rows for the query: every matching equity perp, plus the crypto perps
-   * that have no spot twin among the asset hits (DOGE, XRP, LINK — tokens.xyz
-   * does not list them, so without this they are unreachable from search).
+   * Perp rows for the query: only the perps with no spot twin among the asset
+   * hits (SPY, QQQ, DOGE, XRP — tokens.xyz does not list them, so without this
+   * they are unreachable from search). A perp whose stock or coin IS listed
+   * (NVDA, IREN, BTC) stays out: showing both reads as the same asset twice,
+   * and the perp is reached through that row's spot/perp toggle.
    *
-   * Crypto rows wait for the full-catalog asset search to settle: judged
-   * against the interim local hits, a perp would flash in and then vanish once
-   * its spot twin arrived.
+   * Perp rows wait for the full-catalog asset search to settle: judged against
+   * the interim local hits, a perp would flash in and then vanish once its spot
+   * twin arrived.
    */
   const perpHits = useMemo(() => {
-    if (!q || pastedMint) return [];
+    if (!q || pastedMint || assetSearchLoading) return [];
     const matchesQuery = (m: PhoenixMarket) =>
       m.symbol.toLowerCase().includes(q) || m.name.toLowerCase().includes(q);
-    const equityHits = perpMarkets.filter(matchesQuery);
-    const cryptoHits = assetSearchLoading
-      ? []
-      : phoenixOnlyMarkets(
-          allPerpMarkets.filter(matchesQuery),
-          assetHits,
-          "crypto",
-        );
-    return [...equityHits, ...cryptoHits].slice(0, 4);
-  }, [allPerpMarkets, assetHits, assetSearchLoading, pastedMint, perpMarkets, q]);
+    const queryHits = allPerpMarkets.filter(matchesQuery);
+    return [
+      ...phoenixOnlyMarkets(queryHits, assetHits, "equity"),
+      ...phoenixOnlyMarkets(queryHits, assetHits, "crypto"),
+    ].slice(0, 4);
+  }, [allPerpMarkets, assetHits, assetSearchLoading, pastedMint, q]);
 
   /**
    * The browse tab as a union: the tokens.xyz list first, then the Phoenix
@@ -1406,13 +1393,6 @@ export function SearchResults({
       </ScrollView>
       </Animated.View>
 
-      <StockDetailSheet
-        ref={stockSheetRef}
-        onOpenUser={(privyUserId) => {
-          setSelectedUserId(privyUserId);
-          setUserOpen(true);
-        }}
-      />
 
       {selectedUserId ? (
         <UserProfileScreen

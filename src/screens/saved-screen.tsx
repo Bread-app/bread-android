@@ -12,17 +12,16 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useSharedValue } from 'react-native-reanimated';
 
 import { SkeletonRows } from '@/components/skeleton-rows';
 import { AnimatedRows } from '@/components/animated-rows';
+import { useStockDetail } from '@/lib/stock-detail-store';
+import type { ZoomSourceRect } from '@/lib/zoom-transition';
 import { StockCard } from '@/components/stock-card';
-import { StockDetailSheet, type StockDetailSheetRef } from '@/components/stock-detail-sheet';
 import { Fonts, type ThemeColors } from '@/constants/theme';
 import { useThemeStore } from '@/lib/theme-store';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
 import {
-  appUserPayloadFromPrivyUser,
   getSandwichById,
   getSavedStock,
   setCardLike,
@@ -43,7 +42,6 @@ import { PodcastGroupCard, SandwichCard } from '@/components/sandwich-card';
 import type { PodcastGroupVideo } from '@/components/podcast-sandwich-group-card';
 import { usePodcastGroup } from '@/lib/podcast-group-store';
 import { buildFeedItems } from '@/lib/sandwich-feed';
-import { UserProfileScreen } from '@/screens/user-profile-screen';
 
 const F = Fonts.rounded;
 
@@ -53,10 +51,8 @@ export function SavedScreen() {
   const styles = useThemedStyles(makeStyles);
   const { colors } = useThemeStore();
   const router = useRouter();
+  const stockDetail = useStockDetail();
   const { user } = usePrivy();
-  // A holder tapped in the asset sheet opens their profile over this screen.
-  const [holderId, setHolderId] = useState<string | null>(null);
-  const [holderOpen, setHolderOpen] = useState(false);
   const sandwichDetail = useSandwichDetail();
   const podcastGroup = usePodcastGroup();
   const { savedSandwichOrder, savedStockOrder, isSaved, toggleSave, refresh, hydrated } =
@@ -88,9 +84,7 @@ export function SavedScreen() {
   const [triedSandwich, setTriedSandwich] = useState<Set<string>>(new Set());
   const [triedStock, setTriedStock] = useState<Set<string>>(new Set());
 
-  const stockDetailSheetRef = useRef<StockDetailSheetRef>(null);
   const shareSheetRef = useRef<SandwichShareSheetRef>(null);
-  const stockSheetIndex = useSharedValue(-1);
 
   useEffect(() => {
     let cancelled = false;
@@ -297,9 +291,14 @@ export function SavedScreen() {
     [sandwichDetail, applyUpdatedSandwich],
   );
 
-  const openStock = useCallback((stock: Stock) => {
-    stockDetailSheetRef.current?.open(stock);
-  }, []);
+  // The full-screen asset route, zooming out of the tapped card — the same
+  // destination search, Home and Holdings open.
+  const openStock = useCallback(
+    (stock: Stock, source: ZoomSourceRect | null) => {
+      stockDetail.open(stock, { source });
+    },
+    [stockDetail],
+  );
 
   const isSandwichTab = tab === 'sandwich';
 
@@ -402,24 +401,7 @@ export function SavedScreen() {
         )}
       </ScrollView>
 
-      <StockDetailSheet
-        ref={stockDetailSheetRef}
-        animatedIndex={stockSheetIndex}
-        onOpenUser={(privyUserId) => {
-          setHolderId(privyUserId);
-          setHolderOpen(true);
-        }}
-      />
       <SandwichShareSheet ref={shareSheetRef} />
-      {holderId ? (
-        <UserProfileScreen
-          visible={holderOpen}
-          onClose={() => setHolderOpen(false)}
-          targetPrivyUserId={holderId}
-          viewerPrivyUserId={user?.id ?? null}
-          viewerPayload={user ? appUserPayloadFromPrivyUser(user) : null}
-        />
-      ) : null}
     </SafeAreaView>
   );
 }

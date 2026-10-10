@@ -6,7 +6,6 @@ import { useRouter } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -28,6 +27,7 @@ import { useEmbeddedSolanaWallet, useSigners } from "@privy-io/expo";
 import { useFocusEffect } from "@react-navigation/native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { ConfirmSheet, type ConfirmSheetRef } from "@/components/confirm-sheet";
 import { SkeletonRows } from "@/components/skeleton-rows";
 import { BlurBackdrop } from "@/components/blur-backdrop";
 import { BalanceCardStack } from "@/components/balance-card-stack";
@@ -137,6 +137,7 @@ export function AutoBuyScreen({ showBackButton = true }: { showBackButton?: bool
   const walletStore = useWalletStore();
   const cash = useCash();
   const depositSheetRef = useRef<DepositSheetRef>(null);
+  const confirmSheetRef = useRef<ConfirmSheetRef>(null);
   // TEE wallets: server-side access is granted via session signers, not the
   // on-device delegateWallet (which Privy rejects for TEE execution).
   const { addSigners, removeSigners } = useSigners();
@@ -276,15 +277,14 @@ export function AutoBuyScreen({ showBackButton = true }: { showBackButton?: bool
 
   function confirmDisconnectX() {
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    Alert.alert(
-      "Disconnect X?",
-      "Likes will stop triggering buys, and any auto-buy permission is revoked immediately.",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Disconnect",
-          style: "destructive",
-          onPress: () => {
+    // The tray closes on confirm; the X card's own spinner carries the wait.
+    confirmSheetRef.current?.present({
+      icon: "link-outline",
+      title: "Disconnect X?",
+      body: "Likes will stop triggering buys, and any auto-buy permission is revoked immediately.",
+      confirmLabel: "Disconnect",
+      tone: "destructive",
+      onConfirm: () => {
             void (async () => {
               setBusy("x");
               try {
@@ -296,10 +296,8 @@ export function AutoBuyScreen({ showBackButton = true }: { showBackButton?: bool
                 setBusy(null);
               }
             })();
-          },
-        },
-      ],
-    );
+      },
+    });
   }
 
   // ── Auto mode: Privy session signer (TEE wallets) ───────────────────────────
@@ -313,14 +311,14 @@ export function AutoBuyScreen({ showBackButton = true }: { showBackButton?: bool
       setError("Automatic buys aren't configured (missing signer id). Contact support.");
       return;
     }
-    Alert.alert(
-      "Enable automatic buys?",
-      `Bread will buy sandwiches with YOUR money, without asking, whenever you like a matching X post — $${config?.amountUsdc ?? "-"} per like and up to $${config?.dailyCapUsdc ?? "-"} per day. You can turn this off any time.`,
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "I understand, enable",
-          onPress: () => {
+    // Closes before the Privy approval prompt, which must not open under a sheet.
+    confirmSheetRef.current?.present({
+      icon: "flash-outline",
+      title: "Enable automatic buys?",
+      body: `Bread will buy sandwiches with YOUR money, without asking, whenever you like a matching X post — $${config?.amountUsdc ?? "-"} per like and up to $${config?.dailyCapUsdc ?? "-"} per day. You can turn this off any time.`,
+      confirmLabel: "I understand, enable",
+      tone: "primary",
+      onConfirm: () => {
             void (async () => {
               setBusy("delegate");
               setError(null);
@@ -363,10 +361,8 @@ export function AutoBuyScreen({ showBackButton = true }: { showBackButton?: bool
                 void refresh();
               }
             })();
-          },
-        },
-      ],
-    );
+      },
+    });
   }
 
   async function revokeAutoMode({ disableFeature = false } = {}) {
@@ -696,6 +692,7 @@ export function AutoBuyScreen({ showBackButton = true }: { showBackButton?: bool
         {showBackButton ? renderSettings(false) : null}
       </ScrollView>
 
+      <ConfirmSheet ref={confirmSheetRef} />
       <DepositSheet
         ref={depositSheetRef}
         walletAddress={walletStore.walletAddress}

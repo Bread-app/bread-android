@@ -2,6 +2,13 @@ import type { SandwichDirection, SandwichVenue } from '@/lib/api';
 
 type SelectableLeg = { venue: SandwichVenue };
 
+/**
+ * The most picks a Sandwich may have — manual and remix alike. The server
+ * enforces the same number (MAX_SANDWICH_LEGS in stock-backend buildSandwich.ts)
+ * and refuses a fifth, so the composer stops at it first.
+ */
+export const MAX_SANDWICH_LEGS = 4;
+
 export type ManualSelectionState<T extends SelectableLeg> = {
   direction: SandwichDirection;
   executionVenue: 'perp' | null;
@@ -25,9 +32,12 @@ export function nextManualSelection<T extends SelectableLeg>(
   const changingVenue = current.legs.length > 0 && currentPerp !== pickedPerp;
   const direction = pickedPerp && currentPerp ? current.direction : 'up';
 
+  const replaces = pickedPerp || changingVenue;
+  // At the cap, a further spot pick is ignored rather than appended.
+  if (!replaces && current.legs.length >= MAX_SANDWICH_LEGS) return current;
   return {
     direction,
     executionVenue: pickedPerp ? 'perp' : null,
-    legs: pickedPerp || changingVenue ? [picked] : [...current.legs, picked],
+    legs: replaces ? [picked] : [...current.legs, picked],
   };
 }

@@ -391,8 +391,11 @@ export function PodcastSandwichScreen() {
         episode
           .filter((item) => isSaved('sandwich', item.id) === isBookmarked)
           .map((item) => toggleSave('sandwich', item.id)),
-      ).then(() => {
-        toast.showToast(isBookmarked ? 'Bookmark removed' : 'Episode bookmarked', 'info');
+      ).then((results) => {
+        // The icon confirms itself; speak up only if a save rolled back.
+        if (results.some((saved) => saved === isBookmarked)) {
+          toast.showToast("Couldn't update your bookmark. Try again.", 'error');
+        }
       });
     },
     [canSave, isSaved, toast, toggleSave],

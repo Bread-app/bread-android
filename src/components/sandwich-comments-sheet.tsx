@@ -20,7 +20,6 @@ import React, {
 } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Image,
   Keyboard,
   LayoutAnimation,
@@ -30,7 +29,7 @@ import {
   Text,
   View,
 } from 'react-native';
-import { useReducedMotion } from 'react-native-reanimated';
+import Animated, { FadeIn, ReduceMotion, useReducedMotion } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { SkeletonRows } from '@/components/skeleton-rows';
@@ -49,8 +48,12 @@ import {
   type Sandwich,
 } from '@/lib/api';
 import { useThemeStore } from '@/lib/theme-store';
+import { openModerationMenu } from '@/lib/moderation';
 import { useToast } from '@/lib/toast-store';
 import { PressableScale } from '@/components/pressable-scale';
+
+/** The inline delete confirmation's arrival in place of the trash icon. */
+const CONFIRM_IN = FadeIn.duration(160).reduceMotion(ReduceMotion.System);
 
 const MAX_COMMENT_LENGTH = 500;
 
@@ -269,39 +272,52 @@ export const SandwichCommentsSheet = forwardRef<SandwichCommentsSheetRef, Props>
       }
     }, [animateNextListChange, draft, onCountChange, threadKey, setComments, setKnownCount, submitting, toast]);
 
-    const confirmDelete = useCallback((comment: SandwichComment) => {
+    // Delete confirms in the row itself — the trash turns into "Delete ·
+    // Cancel" — rather than in an alert over a sheet that is already a tray.
+    const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+
+    const deleteComment = useCallback((comment: SandwichComment) => {
       const thread = threadRef.current;
+      setPendingDeleteId(null);
       if (!threadKey || !thread || !comment.viewerCanDelete) return;
-      Alert.alert('Delete comment?', 'This cannot be undone.', [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: () => {
-            const removedIndex = commentsRef.current.findIndex((row) => row.id === comment.id);
-            const previousCount = knownCountRef.current;
-            animateNextListChange();
-            setComments((current) => current.filter((row) => row.id !== comment.id));
-            const nextCount = setKnownCount(previousCount - 1);
-            onCountChange?.(threadKey, nextCount);
-            void deleteThreadComment(thread, comment.id).catch((cause: unknown) => {
-              // Put it back where it was, not at the top — a failed delete that
-              // reordered the thread looked like the comment had been reposted.
-              animateNextListChange();
-              setComments((current) => {
-                if (current.some((row) => row.id === comment.id)) return current;
-                const restored = [...current];
-                restored.splice(removedIndex < 0 ? restored.length : removedIndex, 0, comment);
-                return restored;
-              });
-              setKnownCount(previousCount);
-              onCountChange?.(threadKey, previousCount);
-              toast.showToast(humanizeErrorMessage(cause, "Couldn't delete comment."), 'error');
-            });
-          },
-        },
-      ]);
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+      const removedIndex = commentsRef.current.findIndex((row) => row.id === comment.id);
+      const previousCount = knownCountRef.current;
+      animateNextListChange();
+      setComments((current) => current.filter((row) => row.id !== comment.id));
+      const nextCount = setKnownCount(previousCount - 1);
+      onCountChange?.(threadKey, nextCount);
+      void deleteThreadComment(thread, comment.id).catch((cause: unknown) => {
+        // Put it back where it was, not at the top — a failed delete that
+        // reordered the thread looked like the comment had been reposted.
+        animateNextListChange();
+        setComments((current) => {
+          if (current.some((row) => row.id === comment.id)) return current;
+          const restored = [...current];
+          restored.splice(removedIndex < 0 ? restored.length : removedIndex, 0, comment);
+          return restored;
+        });
+        setKnownCount(previousCount);
+        onCountChange?.(threadKey, previousCount);
+        toast.showToast(humanizeErrorMessage(cause, "Couldn't delete comment."), 'error');
+      });
     }, [animateNextListChange, onCountChange, threadKey, setComments, setKnownCount, toast]);
+
+    // App Review 1.2: someone else's comment can be reported, and its author
+    // blocked — which also drops their comments from this open thread.
+    const openCommentModeration = useCallback((comment: SandwichComment) => {
+      openModerationMenu({
+        report: { targetType: 'comment', targetId: comment.id },
+        author: comment.author.id
+          ? { ref: { userId: comment.author.id }, handle: `@${authorLabel(comment)}` }
+          : null,
+        showToast: toast.showToast,
+        onBlocked: () => {
+          animateNextListChange();
+          setComments((current) => current.filter((row) => row.author.id !== comment.author.id));
+        },
+      });
+    }, [animateNextListChange, setComments, toast]);
 
     const renderComment = useCallback(({ item }: { item: SandwichComment }) => (
       <View style={styles.commentRow}>
@@ -316,22 +332,55 @@ export const SandwichCommentsSheet = forwardRef<SandwichCommentsSheetRef, Props>
           <View style={styles.commentMetaRow}>
             <HandleText numberOfLines={1} style={styles.author}>{`@${authorLabel(item)}`}</HandleText>
             <Text style={styles.timestamp}>{relativeTime(item.createdAt)}</Text>
-            {item.viewerCanDelete ? (
+            {item.viewerCanDelete && pendingDeleteId === item.id ? (
+              <Animated.View entering={CONFIRM_IN} style={styles.deleteConfirm}>
+                <PressableScale
+                  accessibilityRole="button"
+                  accessibilityLabel="Confirm delete comment"
+                  hitSlop={8}
+                  onPress={() => deleteComment(item)}
+                >
+                  <Text style={styles.deleteConfirmText}>Delete</Text>
+                </PressableScale>
+                <Text style={styles.deleteConfirmDot}>·</Text>
+                <PressableScale
+                  accessibilityRole="button"
+                  accessibilityLabel="Keep comment"
+                  hitSlop={8}
+                  onPress={() => setPendingDeleteId(null)}
+                >
+                  <Text style={styles.deleteCancelText}>Cancel</Text>
+                </PressableScale>
+              </Animated.View>
+            ) : item.viewerCanDelete ? (
               <PressableScale
                 accessibilityRole="button"
                 accessibilityLabel="Delete comment"
                 hitSlop={10}
-                onPress={() => confirmDelete(item)}
+                onPress={() => {
+                  void Haptics.selectionAsync();
+                  setPendingDeleteId(item.id);
+                }}
                 style={styles.deleteButton}
               >
                 <Ionicons name="trash-outline" size={15} color={colors.textTertiary} />
               </PressableScale>
-            ) : null}
+            ) : (
+              <PressableScale
+                accessibilityRole="button"
+                accessibilityLabel="Comment options"
+                hitSlop={10}
+                onPress={() => openCommentModeration(item)}
+                style={styles.deleteButton}
+              >
+                <Ionicons name="ellipsis-horizontal" size={15} color={colors.textTertiary} />
+              </PressableScale>
+            )}
           </View>
           <Text selectable style={styles.commentText}>{item.body}</Text>
         </View>
       </View>
-    ), [colors.textTertiary, confirmDelete, styles]);
+    ), [colors.textTertiary, deleteComment, openCommentModeration, pendingDeleteId, styles]);
 
     const remaining = MAX_COMMENT_LENGTH - draft.length;
     const canSubmit = !!draft.trim() && !submitting;
@@ -527,6 +576,10 @@ function makeStyles(c: ThemeColors) {
     commentMetaRow: { minHeight: 20, flexDirection: 'row', alignItems: 'center', gap: 7 },
     author: { flexShrink: 1, color: c.text, fontFamily: Fonts.rounded, fontSize: 13, fontWeight: '800' },
     timestamp: { color: c.textTertiary, fontFamily: Fonts.rounded, fontSize: 12 },
+    deleteConfirm: { flexDirection: 'row', alignItems: 'center', gap: 6, marginLeft: 'auto' },
+    deleteConfirmText: { fontFamily: Fonts.rounded, fontWeight: '800', fontSize: 13, color: c.negative },
+    deleteConfirmDot: { fontFamily: Fonts.rounded, fontSize: 13, color: c.textTertiary },
+    deleteCancelText: { fontFamily: Fonts.rounded, fontWeight: '700', fontSize: 13, color: c.textSecondary },
     deleteButton: { width: 28, height: 28, marginLeft: 'auto', alignItems: 'center', justifyContent: 'center' },
     commentText: { color: c.text, fontFamily: Fonts.rounded, fontSize: 15, lineHeight: 21 },
     moreSpinner: { marginVertical: 16 },

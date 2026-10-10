@@ -6,6 +6,7 @@ import { Image } from "expo-image";
 import { Linking, Pressable, StyleSheet, Text, View } from "react-native";
 import Animated, { useAnimatedStyle, type SharedValue } from "react-native-reanimated";
 
+import { BookmarkIcon } from "@/components/bookmark-icon";
 import { AssetLogo as RemoteAssetLogo } from "@/components/asset-logo";
 import { AssetPriceText } from "@/components/asset-price-text";
 import { HeartToggle, type HeartToggleRef } from "@/components/heart-toggle";
@@ -839,14 +840,17 @@ export const SandwichCard = React.memo(function SandwichCard({
           toast.showToast("Sign in to save sandwiches", "info");
           return;
         }
+        // The icon flips on tap and confirms itself; only a failed save (the
+        // store rolled it back) needs a word.
+        const wanted = !bookmarked;
         void toggleSave("sandwich", sandwich.id).then((saved) => {
-          toast.showToast(saved ? "Sandwich bookmarked" : "Bookmark removed", "info");
+          if (saved !== wanted) toast.showToast("Couldn't update your bookmark. Try again.", "error");
         });
       }}
       style={[styles.cardActionButton, !showShare && styles.cardActionButtonWide]}
     >
-      <Ionicons
-        name={bookmarked ? "bookmark" : "bookmark-outline"}
+      <BookmarkIcon
+        saved={bookmarked}
         size={20}
         color={bookmarked ? colors.accentBlue : colors.textSecondary}
       />
@@ -1498,14 +1502,17 @@ export const PodcastGroupCard = React.memo(function PodcastGroupCard({
                   sandwiches
                     .filter((item) => isSaved("sandwich", item.id) === bookmarked)
                     .map((item) => toggleSave("sandwich", item.id)),
-                ).then(() => {
-                  toast.showToast(bookmarked ? "Bookmark removed" : "Episode bookmarked", "info");
+                ).then((results) => {
+                  // The icon confirms itself; speak up only if a save rolled back.
+                  if (results.some((saved) => saved === bookmarked)) {
+                    toast.showToast("Couldn't update your bookmark. Try again.", "error");
+                  }
                 });
               }}
               style={styles.cardActionButton}
             >
-              <Ionicons
-                name={bookmarked ? "bookmark" : "bookmark-outline"}
+              <BookmarkIcon
+                saved={bookmarked}
                 size={20}
                 color={bookmarked ? colors.accentBlue : colors.textSecondary}
               />

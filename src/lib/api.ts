@@ -8838,3 +8838,50 @@ export async function setShowPositionSize(showPositionSize: boolean): Promise<bo
   }).catch(() => null);
   return isRecord(payload) ? payload.showPositionSize !== false : false;
 }
+
+// ─── Account deletion, block & report (App Review 5.1.1(v), 1.2) ─────────────
+
+/** Permanently deletes the caller's account. The device logs out after. */
+export async function deleteMyAccount(): Promise<void> {
+  await requestJson<unknown>('/api/users/account', { method: 'DELETE', timeoutMs: 60_000 });
+}
+
+/** Profiles address users by Privy id; builders and comment authors by AppUser id. */
+export type ModerationUserRef = { userId: string } | { privyUserId: string };
+
+export type BlockedUser = {
+  id: string;
+  privyUserId: string;
+  username: string | null;
+  name: string | null;
+  avatarUrl: string | null;
+  blockedAt: string;
+};
+
+export async function getBlockedUsers(): Promise<BlockedUser[]> {
+  const payload = await requestJson<unknown>('/api/users/blocks');
+  if (!isRecord(payload) || !Array.isArray(payload.blocked)) return [];
+  return payload.blocked.filter(
+    (row): row is BlockedUser => isRecord(row) && typeof row.id === 'string' && typeof row.privyUserId === 'string',
+  );
+}
+
+export async function blockUser(ref: ModerationUserRef): Promise<void> {
+  await requestJson<unknown>('/api/users/blocks', { method: 'POST', body: ref });
+}
+
+export async function unblockUser(ref: ModerationUserRef): Promise<void> {
+  await requestJson<unknown>('/api/users/blocks', { method: 'DELETE', body: ref });
+}
+
+export type ReportTargetType = 'user' | 'sandwich' | 'comment';
+export type ReportReason = 'spam' | 'harassment' | 'hate' | 'scam' | 'sexual' | 'violence' | 'other';
+
+export async function reportContent(input: {
+  targetType: ReportTargetType;
+  targetId: string;
+  reason: ReportReason;
+  details?: string;
+}): Promise<void> {
+  await requestJson<unknown>('/api/reports', { method: 'POST', body: input });
+}

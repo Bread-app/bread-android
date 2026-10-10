@@ -54,6 +54,7 @@ import Animated, {
 } from "react-native-reanimated";
 import Svg, { Path, Rect } from "react-native-svg";
 import { Gesture, GestureDetector, GestureHandlerRootView } from "react-native-gesture-handler";
+import { BookmarkIcon } from "@/components/bookmark-icon";
 import { SkeletonRows } from "@/components/skeleton-rows";
 import { ScaleRuler } from "@/components/scale-ruler";
 import { LegTapHint } from "@/components/leg-tap-hint";
@@ -117,10 +118,6 @@ import {
   type SandwichChartRange,
 } from "@/components/sandwich-basket-chart";
 import { AnimatedScrubText } from "@/components/animated-scrub-text";
-import {
-  StockDetailSheet,
-  type StockDetailSheetRef,
-} from "@/components/stock-detail-sheet";
 import { SandwichLegCard } from "@/components/sandwich-leg-card";
 import {
   SandwichShareSheet,
@@ -209,7 +206,7 @@ import { useSandwichComposer } from "@/lib/sandwich-composer-store";
 import { getAnonymousSocialId } from "@/lib/social-identity";
 import { useComposerProgress } from "@/lib/composer-progress-store";
 import { useToast } from "@/lib/toast-store";
-import { nextManualSelection } from "@/lib/manual-sandwich-selection";
+import { MAX_SANDWICH_LEGS, nextManualSelection } from "@/lib/manual-sandwich-selection";
 import { XSummonBadge } from "@/components/x-summon-badge";
 import {
   ScaledSandwichSection,
@@ -272,6 +269,7 @@ import {
   type FeedSort,
   type SourceVideo,
 } from "@/lib/sandwich-feed";
+import { openModerationMenu } from "@/lib/moderation";
 
 const F = Fonts.rounded;
 
@@ -1103,8 +1101,17 @@ function draftForRemix(parent: Sandwich): ComposerDraft {
   const spotLegs = [...parent.legs]
     .sort((a, b) => a.order - b.order)
     .filter((leg) => leg.type !== "prediction_market");
+  // A remix obeys the same cap as any Sandwich: an older parent with more
+  // picks keeps its largest MAX_SANDWICH_LEGS, in their original order.
+  const capped =
+    spotLegs.length > MAX_SANDWICH_LEGS
+      ? [...spotLegs]
+          .sort((a, b) => b.weightBps - a.weightBps)
+          .slice(0, MAX_SANDWICH_LEGS)
+          .sort((a, b) => a.order - b.order)
+      : spotLegs;
   const legs =
-    spotLegs.length === parent.legs.length ? spotLegs : rebalanceLegsEqually(spotLegs);
+    capped.length === parent.legs.length ? capped : rebalanceLegsEqually(capped);
   return {
     ...makeManualDraft(),
     executionVenue: parent.venue === "perp" ? "perp" : null,
@@ -1337,6 +1344,18 @@ export function SandwichComposerScreen() {
     const parent = getRemixSource();
     return parent ? draftForRemix(parent) : null;
   });
+  // Said once, not saved on the card: an older parent with more picks than the
+  // cap is remixed with its largest MAX_SANDWICH_LEGS.
+  const composerToast = useToast();
+  useEffect(() => {
+    const parent = getRemixSource();
+    const spot = parent?.legs.filter((leg) => leg.type !== "prediction_market").length ?? 0;
+    if (spot > MAX_SANDWICH_LEGS) {
+      composerToast.showToast(`Remixes keep up to ${MAX_SANDWICH_LEGS} picks — kept the ${MAX_SANDWICH_LEGS} largest.`, "info");
+    }
+    // Once, on open.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const isRemix = !!draft?.remixOf;
   // iOS uses a UIKit page sheet; other platforms keep the inline picker.
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -3671,16 +3690,32 @@ function LegPickerOverlay({
   // assigned automatically (equal split) by the parent's addLeg, then
   // fine-tuned in the review step — so there's no per-leg weight prompt while
   // picking.
+  // Shown in the review bar — inside the sheet, so it is visible on iOS where
+  // the picker is a native page sheet that covers the app-level toast.
+  const [limitHit, setLimitHit] = useState(false);
+  useEffect(() => {
+    if (!limitHit) return;
+    const timer = setTimeout(() => setLimitHit(false), 2400);
+    return () => clearTimeout(timer);
+  }, [limitHit]);
+
   const handlePickStock = useCallback(
     (stock: Stock) => {
-      void Haptics.selectionAsync();
       if (stock.id && selectedMints.has(stock.id)) {
+        void Haptics.selectionAsync();
         onRemoveMint(stock.id);
         return;
       }
+      // Spot picks stack (a perp replaces the whole draft), so only they hit the cap.
+      if (selectedPerpMints.size === 0 && legsCount >= MAX_SANDWICH_LEGS) {
+        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+        setLimitHit(true);
+        return;
+      }
+      void Haptics.selectionAsync();
       onPicked(stockToLeg(stock, 0));
     },
-    [onPicked, onRemoveMint, selectedMints],
+    [legsCount, onPicked, onRemoveMint, selectedMints, selectedPerpMints],
   );
 
   const handlePickPerp = useCallback(
@@ -3838,9 +3873,13 @@ function LegPickerOverlay({
             <View style={styles.reviewBarLeft}>
               <Text style={styles.reviewBarEmoji}>🥪</Text>
               <Text style={styles.reviewBarCount}>
-                {legsCount === 0
-                  ? "No legs yet"
-                  : `${legsCount} leg${legsCount === 1 ? "" : "s"}`}
+                {limitHit
+                  ? `Max ${MAX_SANDWICH_LEGS} legs per Sandwich`
+                  : legsCount === 0
+                    ? "No legs yet"
+                    : selectedPerpMints.size > 0
+                      ? `${legsCount} leg${legsCount === 1 ? "" : "s"}`
+                      : `${legsCount}/${MAX_SANDWICH_LEGS} legs${legsCount >= MAX_SANDWICH_LEGS ? " · max" : ""}`}
               </Text>
             </View>
             <Pressable
@@ -4784,6 +4823,23 @@ export function SandwichDetailScreen() {
     }
   }, [creator, heroIdentity?.url, openCreatorProfile]);
   const viewerPrivyUserId = appUser?.privyUserId ?? null;
+  // App Review 1.2: report the Sandwich / block its creator. Signed-in viewers
+  // only (reports are authenticated), and never on your own Sandwich.
+  const isOwnSandwich = Boolean(creatorPrivyUserId && creatorPrivyUserId === viewerPrivyUserId);
+  const openSandwichModeration = useCallback(() => {
+    if (!sandwich) return;
+    openModerationMenu({
+      report: { targetType: "sandwich", targetId: sandwich.id },
+      author:
+        creator && creatorPrivyUserId
+          ? { ref: { privyUserId: creatorPrivyUserId }, handle: `@${creator.name.replace(/^@+/, "")}` }
+          : null,
+      showToast: toast.showToast,
+      onBlocked: () => {
+        if (router.canGoBack()) router.back();
+      },
+    });
+  }, [creator, creatorPrivyUserId, router, sandwich, toast.showToast]);
   const canFollowCreator = Boolean(
     creator &&
       creatorPrivyUserId &&
@@ -5273,7 +5329,20 @@ export function SandwichDetailScreen() {
                       </PressableScale>
                     )
                   : "",
-              headerRight: undefined,
+              headerRight:
+                sandwich && viewerPrivyUserId && !isOwnSandwich
+                  ? () => (
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel="More options"
+                        hitSlop={10}
+                        onPress={openSandwichModeration}
+                        style={styles.moderationHeaderButton}
+                      >
+                        <Ionicons name="ellipsis-horizontal" size={22} color={colors.icon} />
+                      </Pressable>
+                    )
+                  : undefined,
             }}
           />
           <Animated.View style={{ flex: 1 }}>
@@ -5536,18 +5605,20 @@ export function SandwichDetailScreen() {
                           toast.showToast("Sign in to save sandwiches", "info");
                           return;
                         }
+                        // The icon flips on tap and confirms itself; only a
+                        // failed save (the store rolled it back) needs a word.
+                        const wanted = !bookmarked;
                         void toggleSave("sandwich", sandwich.id).then((saved) => {
-                          toast.showToast(
-                            saved ? "Sandwich bookmarked" : "Bookmark removed",
-                            "info",
-                          );
+                          if (saved !== wanted) {
+                            toast.showToast("Couldn't update your bookmark. Try again.", "error");
+                          }
                         });
                       }}
                       hitSlop={8}
                       style={styles.detailMetaBtn}
                     >
-                      <Ionicons
-                        name={bookmarked ? "bookmark" : "bookmark-outline"}
+                      <BookmarkIcon
+                        saved={bookmarked}
                         size={24}
                         color={bookmarked ? colors.accentBlue : colors.textSecondary}
                       />
@@ -6074,9 +6145,9 @@ export function SandwichScreen() {
   const navigation = useNavigation();
   const deepLinkHandledRef = useRef<string | null>(null);
   const [anonymousId, setAnonymousId] = useState<string | null>(null);
-  const stockDetailSheetRef = useRef<StockDetailSheetRef>(null);
-  // Single, app-wide detail screen — opened imperatively from the tap below.
+  // Single, app-wide detail screens — opened imperatively from the tap below.
   const sandwichDetail = useSandwichDetail();
+  const { open: openStockRoute } = useStockDetail();
   const podcastGroup = usePodcastGroup();
   const shareSheetRef = useRef<SandwichShareSheetRef>(null);
   const composer = useSandwichComposer();
@@ -6893,7 +6964,9 @@ export function SandwichScreen() {
                 onRefresh={() => void loadNews(true)}
                 bottomInset={composeFabBottom + 56}
                 onOpenStory={openNewsStory}
-                onOpenStock={(stock) => stockDetailSheetRef.current?.open(stock)}
+                // A ticker chip is too small to grow out of, so the asset
+                // route presents from the bottom edge — same screen as anywhere.
+                onOpenStock={(stock) => openStockRoute(stock)}
               />
             </View>
           </Animated.View>
@@ -6902,13 +6975,6 @@ export function SandwichScreen() {
 
 
       <SandwichShareSheet ref={shareSheetRef} />
-      <StockDetailSheet
-        ref={stockDetailSheetRef}
-        onOpenUser={(privyUserId) => {
-          setSelectedUserId(privyUserId);
-          setUserProfileOpen(true);
-        }}
-      />
       {selectedUserId && (
         <UserProfileScreen
           visible={userProfileOpen}
@@ -9314,6 +9380,12 @@ const makeStyles = (c: ThemeColors) => {
   detailScreenRoot: {
     flex: 1,
     backgroundColor: c.background,
+  },
+  moderationHeaderButton: {
+    width: 36,
+    height: 36,
+    alignItems: "center",
+    justifyContent: "center",
   },
   stickyHeaderUser: {
     flexDirection: "row",

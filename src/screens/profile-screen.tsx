@@ -44,7 +44,8 @@ import { settleJupUsdToCash, signAndSendBase64WithResult } from "@/lib/cash";
 import { useCash } from "@/hooks/use-cash";
 import { PnlChart } from "@/components/portfolio-value-chart";
 import { type TakeComposerTarget } from "@/lib/position-takes";
-import { StockDetailSheet, type StockDetailSheetRef } from "@/components/stock-detail-sheet";
+import { ZoomSource } from "@/components/zoom-source";
+import { type StockDetailOpenOptions, useStockDetail } from "@/lib/stock-detail-store";
 import { AssetLogo } from "@/components/asset-logo";
 import { AnimatedRows } from "@/components/animated-rows";
 import { ClosedPositionRow } from "@/components/closed-position-row";
@@ -750,7 +751,6 @@ export function ProfileScreen() {
   const positionDetailSheetRef = useRef<PositionDetailSheetRef>(null);
   const [focusedPosition, setFocusedPosition] =
     useState<FocusedPositionData | null>(null);
-  const stockDetailSheetRef = useRef<StockDetailSheetRef>(null);
   const sandwichTradeSheetRef = useRef<TradeAmountSheetRef>(null);
   const positionShareSheetRef = useRef<PositionShareSheetRef>(null);
 
@@ -802,6 +802,7 @@ export function ProfileScreen() {
   const [postsLoading, setPostsLoading] = useState(false);
   const [anonymousId, setAnonymousId] = useState<string | null>(null);
   const sandwichDetail = useSandwichDetail();
+  const stockDetail = useStockDetail();
   const podcastGroup = usePodcastGroup();
   const postShareSheetRef = useRef<SandwichShareSheetRef>(null);
   const [pnlHistory, setPnlHistory] = useState<PnlHistory | null>(null);
@@ -853,7 +854,7 @@ export function ProfileScreen() {
     return () => task.cancel();
   }, [pendingViewedUser, socialScreenOpen]);
 
-  const openStockDetail = useCallback((token: WalletBalanceToken) => {
+  const openStockDetail = useCallback((token: WalletBalanceToken, zoom?: StockDetailOpenOptions) => {
     const symbol = (token.symbol ?? '').trim();
     if (!symbol) return;
 
@@ -870,11 +871,10 @@ export function ProfileScreen() {
       volume24h: null,
     };
 
-    // A holding opens as a sheet, like every other Holdings row — it reads the
-    // holding, cost basis and Sell affordance off the wallet store itself.
-    void Haptics.selectionAsync();
-    stockDetailSheetRef.current?.open(stock);
-  }, []);
+    // The same full-screen asset route every other surface opens — it reads
+    // the holding, cost basis and Sell affordance off the wallet store itself.
+    stockDetail.open(stock, zoom);
+  }, [stockDetail]);
 
   useEffect(() => {
     return () => {
@@ -4109,16 +4109,23 @@ export function ProfileScreen() {
                   !pnl ? colors.textTertiary : pnl.pnlPct >= 0 ? colors.positive : colors.negative;
                 const pnlLabel = formatPnlPercentage(pnl?.pnlPct);
                 const isOpenable = !!(token.symbol && token.symbol.trim());
+                const zoomKey = `holding:${token.mint ?? tokenLabel}-${index}`;
                 return (
+                  // The asset screen grows out of this row, as it does from search.
+                  <ZoomSource key={`${token.mint ?? tokenLabel}-${index}`} zoomKey={zoomKey}>
+                  {(zoom) => (
                   <Pressable
-                    key={`${token.mint ?? tokenLabel}-${index}`}
+                    ref={zoom.ref}
+                    testID={zoom.testID}
                     accessibilityRole="button"
                     accessibilityLabel={`Open ${tokenLabel} details`}
                     disabled={!isOpenable}
                     onPress={() => {
                       if (!isOpenable) return;
                       void Haptics.selectionAsync();
-                      openStockDetail(token);
+                      void zoom.measure().then((source) =>
+                        openStockDetail(token, { source, nativeSourceKey: zoomKey }),
+                      );
                     }}
                     style={({ pressed }) => [
                       styles.tokenRow,
@@ -4155,6 +4162,8 @@ export function ProfileScreen() {
                       ) : null}
                     </View>
                   </Pressable>
+                  )}
+                  </ZoomSource>
                 );
               })}
               {holdingsCategory === "tokens" && holdingTokens.length === 0 ? (
@@ -4291,7 +4300,6 @@ export function ProfileScreen() {
         onAddThesis={(open) => open()}
       />
       <PositionShareSheet ref={positionShareSheetRef} />
-      <StockDetailSheet ref={stockDetailSheetRef} />
       <Modal
         visible={selectedPerpSandwich !== null}
         transparent

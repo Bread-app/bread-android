@@ -244,6 +244,13 @@ export default function ProtectedAppLayout() {
                     }}
                   />
                   <Stack.Screen
+                    name="blocked-users"
+                    options={{
+                      headerShown: false,
+                      ...PUSH_TRANSITION,
+                    }}
+                  />
+                  <Stack.Screen
                     name="activity"
                     options={{
                       headerShown: false,

@@ -10,7 +10,7 @@ import {
   Text,
   View,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { Stack, useRouter } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import * as Haptics from 'expo-haptics';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -33,6 +33,7 @@ import {
   getSandwichShareUrl,
   getSandwiches,
   getStockById,
+  getTopHolderStocks,
   getUserClosedPositions,
   getUserHoldings,
   getUserTakes,
@@ -51,6 +52,7 @@ import {
   type Sandwich,
   type SocialUser,
   type Stock,
+  getBlockedUsers,
 } from '@/lib/api';
 import { SkeletonRows } from '@/components/skeleton-rows';
 import { Fonts, type ThemeColors } from '@/constants/theme';
@@ -62,6 +64,8 @@ import {
 import { LoadErrorState } from '@/components/load-error-state';
 import { PublicSandwichHoldingCard, positionDetailProvenance } from '@/components/sandwich-holding-card';
 import { useThemeStore } from '@/lib/theme-store';
+import { useToast } from '@/lib/toast-store';
+import { openModerationMenu } from '@/lib/moderation';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
 import { cardSocial, toggledCardSocial, withCardSocial } from '@/lib/card-social';
 import { getAnonymousSocialId } from '@/lib/social-identity';
@@ -81,7 +85,9 @@ import { FollowButton } from '@/components/follow-button';
 import { IosSegmentedControl } from '@/components/ios-segmented-control';
 import { PnlChart } from '@/components/portfolio-value-chart';
 import { SandwichShareSheet, type SandwichShareSheetRef } from '@/components/sandwich-share-sheet';
-import { StockDetailSheet, type StockDetailSheetRef } from '@/components/stock-detail-sheet';
+import { useStockDetail } from '@/lib/stock-detail-store';
+import { phoenixPerpOnlyStock } from '@/lib/hyperliquid-perp-market';
+import { normalizePhoenixAssetSymbol, phoenixMarketMatchesAsset } from '@/lib/phoenix-symbol';
 import { ValueSkeleton, ValueSkeletonLine } from '@/components/value-skeleton';
 import { VerifiedBadge } from '@/components/verified-badge';
 import { PodcastGroupCard, SandwichCard, TakePostCard } from '@/components/sandwich-card';
@@ -536,7 +542,6 @@ function UserProfileView({
   const [sandwichPosts, setSandwichPosts] = useState<Sandwich[]>([]);
   const [sandwichesLoading, setSandwichesLoading] = useState(false);
   const [anonymousId, setAnonymousId] = useState<string | null>(null);
-  const stockDetailSheetRef = useRef<StockDetailSheetRef>(null);
   const shareSheetRef = useRef<SandwichShareSheetRef>(null);
   const positionShareSheetRef = useRef<PositionShareSheetRef>(null);
   const positionDetailSheetRef = useRef<PositionDetailSheetRef>(null);
@@ -549,6 +554,7 @@ function UserProfileView({
   /** The position card open over this profile — theirs, so read-only. */
   const [focusedPosition, setFocusedPosition] = useState<FocusedPositionData | null>(null);
   const sandwichDetail = useSandwichDetail();
+  const stockDetail = useStockDetail();
   const podcastGroup = usePodcastGroup();
   const [followOverride, setFollowOverride] = useState<boolean | null>(null);
   const [followLoading, setFollowLoading] = useState(false);
@@ -761,7 +767,6 @@ function UserProfileView({
       void load();
       return;
     }
-    stockDetailSheetRef.current?.close();
   }, [visible, load]);
 
   // (Re)load the value chart whenever the screen opens or the range changes.
@@ -901,14 +906,29 @@ function UserProfileView({
     [presentPosition],
   );
 
-  /** A perp row opens its market in this screen's own asset sheet. */
+  /**
+   * A perp row opens its market on the app-wide asset screen, on the perp
+   * venue. Its spot twin (NVDA for the NVDA perp) is the record when there is
+   * one, so the Spot/Perp toggle works; a perp-only market gets the stand-in.
+   */
   const openPerpMarket = useCallback(
     (symbol: string, side: 'long' | 'short') => {
       void getPhoenixMarket(symbol)
-        .then(({ market }) => stockDetailSheetRef.current?.openPerp(market, null, side))
+        .then(async ({ market, markPrice }) => {
+          const spot = await getTopHolderStocks({ q: normalizePhoenixAssetSymbol(market.symbol), limit: 20 })
+            .then((results) => results.find((candidate) => phoenixMarketMatchesAsset(market, candidate)) ?? null)
+            .catch(() => null);
+          pushBehindModal(() =>
+            stockDetail.open(spot ?? phoenixPerpOnlyStock(market, markPrice), {
+              perpMarket: market,
+              venue: 'perp',
+              side,
+            }),
+          );
+        })
         .catch(() => {});
     },
-    [],
+    [pushBehindModal, stockDetail],
   );
 
   const openPerpPosition = useCallback(
@@ -948,11 +968,11 @@ function UserProfileView({
       }
       if (position.mint) {
         void getStockById(position.mint)
-          .then((stock) => stockDetailSheetRef.current?.open(stock))
+          .then((stock) => pushBehindModal(() => stockDetail.open(stock)))
           .catch(() => {});
       }
     },
-    [hydrateFocusedSandwich, openPerpMarket],
+    [hydrateFocusedSandwich, openPerpMarket, pushBehindModal, stockDetail],
   );
 
   const shareFocusedPosition = useCallback((data: FocusedPositionData) => {
@@ -1040,6 +1060,38 @@ function UserProfileView({
 
   const isFollowing = followOverride !== null ? followOverride : (profile?.isFollowing ?? false);
   const isOwnProfile = targetPrivyUserId === viewerPrivyUserId;
+
+  // App Review 1.2: report / block from the header "…". Whether the viewer has
+  // already blocked this account decides Block vs Unblock.
+  const { colors: themeColors } = useThemeStore();
+  const { showToast } = useToast();
+  const [isBlocked, setIsBlocked] = useState(false);
+  const canModerate = Boolean(asRoute && viewerPayload && !isOwnProfile);
+  useEffect(() => {
+    if (!canModerate) return;
+    let cancelled = false;
+    void getBlockedUsers()
+      .then((blocked) => {
+        if (!cancelled) setIsBlocked(blocked.some((u) => u.privyUserId === targetPrivyUserId));
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [canModerate, targetPrivyUserId]);
+  const openProfileModeration = useCallback(() => {
+    const handle = profile?.username ? `@${profile.username}` : 'this account';
+    openModerationMenu({
+      report: { targetType: 'user', targetId: targetPrivyUserId },
+      author: { ref: { privyUserId: targetPrivyUserId }, handle, isBlocked },
+      showToast,
+      onBlocked: () => {
+        setIsBlocked(true);
+        onClose();
+      },
+      onUnblocked: () => setIsBlocked(false),
+    });
+  }, [isBlocked, onClose, profile?.username, showToast, targetPrivyUserId]);
 
   async function handleFollow() {
     if (!viewerPayload || !profile || followLoading) return;
@@ -1553,8 +1605,24 @@ function UserProfileView({
           rendered here would otherwise portal to the app-root provider and
           appear BEHIND this Modal (tapping a holding did nothing). Nesting a
           GestureHandlerRootView + BottomSheetModalProvider inside the Modal gives
-          the StockDetailSheet a portal host in-tree so it presents on top and
+          its sheets (position detail, share) a portal host in-tree so they present on top and
           its gestures work. Mirrors buy-success-sheet's in-Modal provider. */}
+      {canModerate ? (
+        <Stack.Screen
+          options={{
+            headerRight: () => (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="More options"
+                hitSlop={10}
+                onPress={openProfileModeration}
+                style={styles.moderationHeaderButton}>
+                <Ionicons name="ellipsis-horizontal" size={22} color={themeColors.icon} />
+              </Pressable>
+            ),
+          }}
+        />
+      ) : null}
       <GestureHandlerRootView style={styles.container}>
         <BottomSheetModalProvider>
       <GestureDetector gesture={swipeToDismiss}>
@@ -1609,12 +1677,6 @@ function UserProfileView({
         )}
       </Animated.View>
       </GestureDetector>
-      <StockDetailSheet
-        ref={stockDetailSheetRef}
-        onOpenSandwich={(sandwich, options) =>
-          pushBehindModal(() => sandwichDetail.open(sandwich, options))
-        }
-      />
       <SandwichShareSheet ref={shareSheetRef} />
       <PositionDetailSheet
         ref={positionDetailSheetRef}
@@ -1643,6 +1705,12 @@ function UserProfileView({
 
 const makeStyles = (c: ThemeColors) => StyleSheet.create({
   container: { flex: 1, backgroundColor: c.background },
+  moderationHeaderButton: {
+    width: 36,
+    height: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   header: {
     flexDirection: 'row',
     alignItems: 'center',

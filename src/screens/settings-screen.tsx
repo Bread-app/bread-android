@@ -2,7 +2,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { useEmbeddedSolanaWallet, usePrivy } from '@privy-io/expo';
 import * as Haptics from 'expo-haptics';
 import { useRouter } from 'expo-router';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   ActionSheetIOS,
   ActivityIndicator,
@@ -17,9 +17,10 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { ConfirmSheet, type ConfirmSheetRef } from '@/components/confirm-sheet';
 import { Fonts, type ThemeColors } from '@/constants/theme';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
-import { getUserProfile, setShowPositionSize } from '@/lib/api';
+import { deleteMyAccount, getUserProfile, humanizeErrorMessage, setShowPositionSize } from '@/lib/api';
 import { DEMO_STARTING_CASH_USD, resetDemoAccount } from '@/lib/demo-account';
 import { useDemoBuyMode } from '@/lib/demo-buy-mode';
 import { clearStoredSandwichPositions } from '@/lib/sandwich-positions';
@@ -184,27 +185,24 @@ export function SettingsScreen() {
   const walletAddress = solanaWallet.wallets?.[0]?.address ?? null;
   const walletStore = useWalletStore();
 
+  const confirmSheetRef = useRef<ConfirmSheetRef>(null);
+
   function confirmResetDemo(): void {
-    Alert.alert(
-      'Reset demo account?',
-      `Demo cash goes back to $${DEMO_STARTING_CASH_USD.toFixed(2)} and every demo position is cleared.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Reset',
-          style: 'destructive',
-          onPress: () => {
-            void (async () => {
-              await resetDemoAccount();
-              if (walletAddress) await clearStoredSandwichPositions(walletAddress);
-              void walletStore.refresh();
-              void walletStore.reloadCostBasis();
-              showToast('Demo account reset', 'success');
-            })();
-          },
-        },
-      ],
-    );
+    confirmSheetRef.current?.present({
+      icon: 'refresh',
+      title: 'Reset demo account?',
+      body: `Demo cash goes back to $${DEMO_STARTING_CASH_USD.toFixed(2)} and every demo position is cleared.`,
+      confirmLabel: 'Reset demo',
+      busyLabel: 'Resetting',
+      tone: 'destructive',
+      onConfirm: async () => {
+        await resetDemoAccount();
+        if (walletAddress) await clearStoredSandwichPositions(walletAddress);
+        void walletStore.refresh();
+        void walletStore.reloadCostBasis();
+        showToast('Demo account reset', 'success');
+      },
+    });
   }
 
   async function openEditProfile(): Promise<void> {
@@ -240,6 +238,58 @@ export function SettingsScreen() {
     } finally {
       setIsLoggingOut(false);
     }
+  }
+
+  const [isDeletingAccount, setIsDeletingAccount] = useState(false);
+
+  /**
+   * App Review 5.1.1(v). Deleting the Privy user also deletes the embedded
+   * wallet's login, so whatever is still in it becomes unreachable — the first
+   * alert says so with the balance when we have a real one.
+   */
+  function confirmDeleteAccount(): void {
+    if (isDeletingAccount) return;
+    const walletUsd =
+      !demoBuys && walletStore.hasLoaded
+        ? walletStore.tokens.reduce((sum, token) => sum + (token.usdValue ?? 0), 0)
+        : null;
+    const balanceLine =
+      walletUsd !== null && walletUsd >= 0.01
+        ? `Your wallet still holds about $${walletUsd.toFixed(2)}. `
+        : '';
+    // Two steps in one tray: the consequences, then the point of no return.
+    // The second is shorter, so the tray visibly steps down into it.
+    confirmSheetRef.current?.present({
+      icon: 'warning-outline',
+      title: 'Delete your account?',
+      body: `${balanceLine}Withdraw everything first: once your account is deleted, your wallet and anything left in it — cash, assets, Sandwiches and perps collateral — can't be recovered by you or by us.\n\nYour profile, follows, comments and settings are erased. Sandwiches you published stay up without your name.`,
+      confirmLabel: 'Continue',
+      tone: 'destructive',
+      onConfirm: () => ({
+        title: 'This is permanent',
+        body: 'Delete your Bread account now? This cannot be undone.',
+        confirmLabel: 'Delete account',
+        busyLabel: 'Deleting',
+        tone: 'destructive',
+        onConfirm: () => deleteAccount(),
+      }),
+    });
+  }
+
+  async function deleteAccount(): Promise<void> {
+    setIsDeletingAccount(true);
+    try {
+      // While the session can still authenticate the call.
+      await unregisterCurrentPushToken().catch(() => {});
+      await deleteMyAccount();
+    } catch (error) {
+      setIsDeletingAccount(false);
+      showToast(humanizeErrorMessage(error, "Couldn't delete your account. Try again."), 'error');
+      return;
+    }
+    if (walletAddress) await clearStoredSandwichPositions(walletAddress).catch(() => {});
+    await logout().catch(() => {});
+    showToast('Your account was deleted', 'success');
   }
 
   function chooseAppearance(): void {
@@ -368,6 +418,11 @@ export function SettingsScreen() {
             onPress={() => router.push('/notification-settings')}
           />
           <SettingsRow
+            icon="ban"
+            label="Blocked accounts"
+            onPress={() => router.push('/blocked-users')}
+          />
+          <SettingsRow
             icon="log-out"
             label="Log out"
             disabled={isLoggingOut}
@@ -376,8 +431,18 @@ export function SettingsScreen() {
             showChevron={false}
             tone="destructive"
           />
+          <SettingsRow
+            icon="trash"
+            label="Delete account"
+            disabled={isDeletingAccount}
+            haptic="heavy"
+            onPress={confirmDeleteAccount}
+            showChevron={false}
+            tone="destructive"
+          />
         </View>
       </ScrollView>
+      <ConfirmSheet ref={confirmSheetRef} />
     </SafeAreaView>
   );
 }

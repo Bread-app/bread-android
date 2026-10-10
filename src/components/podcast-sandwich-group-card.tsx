@@ -5,6 +5,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Image, Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 import Animated, { FadeIn, LinearTransition, ReduceMotion } from 'react-native-reanimated';
 
+import { BookmarkIcon } from '@/components/bookmark-icon';
 import { AssetLogo as RemoteAssetLogo } from '@/components/asset-logo';
 import type { Sandwich, SandwichLeg } from '@/lib/api';
 import { youTubeWatchUrl } from '@/lib/api';
@@ -532,8 +533,8 @@ export function PodcastSandwichDetail({
             hitSlop={8}
             style={styles.actionButton}
           >
-            <Ionicons
-              name={bookmarked ? 'bookmark' : 'bookmark-outline'}
+            <BookmarkIcon
+              saved={bookmarked}
               size={24}
               color={bookmarked ? colors.accentBlue : colors.textSecondary}
             />

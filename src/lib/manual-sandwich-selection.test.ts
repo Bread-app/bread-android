@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { nextManualSelection } from './manual-sandwich-selection';
+import { MAX_SANDWICH_LEGS, nextManualSelection } from './manual-sandwich-selection';
 
 type Leg = { id: string; venue: 'spot' | 'perp' };
 
@@ -65,5 +65,22 @@ describe('manual Sandwich venue selection', () => {
       executionVenue: null,
       legs: [{ id: 'aapl', venue: 'spot' }],
     });
+  });
+
+  it('stops stacking spot picks at the 4-leg cap', () => {
+    const full = Array.from({ length: MAX_SANDWICH_LEGS }, (_, i) => ({ id: `s${i}`, venue: 'spot' as const }));
+    const current = { direction: 'up' as const, executionVenue: null, legs: full };
+
+    expect(MAX_SANDWICH_LEGS).toBe(4);
+    expect(nextManualSelection<Leg>(current, { id: 'fifth', venue: 'spot' })).toBe(current);
+  });
+
+  it('still lets a perp replace a full spot basket', () => {
+    const full = Array.from({ length: MAX_SANDWICH_LEGS }, (_, i) => ({ id: `s${i}`, venue: 'spot' as const }));
+    const result = nextManualSelection<Leg>(
+      { direction: 'up', executionVenue: null, legs: full },
+      { id: 'tsla-perp', venue: 'perp' },
+    );
+    expect(result.legs).toEqual([{ id: 'tsla-perp', venue: 'perp' }]);
   });
 });

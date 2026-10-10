@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   Dimensions,
   Image,
   Keyboard,
@@ -23,12 +22,14 @@ import Ionicons from "@expo/vector-icons/Ionicons";
 import { CTA, ctaBottomInset } from '@/lib/screen-corners';
 import { Fonts, type ThemeColors } from "@/constants/theme";
 import { useThemeStore } from "@/lib/theme-store";
+import { useToast } from "@/lib/toast-store";
 import { useThemedStyles } from "@/hooks/use-themed-styles";
 import {
   createManualSandwich,
   createCuratedEntry,
   uploadCuratedCoverImageMobile,
   getTopHolderStocks,
+  humanizeErrorMessage,
   type AppUserPayload,
   type Stock,
 } from "@/lib/api";
@@ -88,6 +89,7 @@ export function CreateCuratedSandwichScreen({ visible, onClose, userPayload }: P
   const insets = useSafeAreaInsets();
   const styles = useThemedStyles(makeStyles);
   const { colors } = useThemeStore();
+  const toast = useToast();
 
   // Editable card fields
   const [name, setName] = useState("");
@@ -140,7 +142,7 @@ export function CreateCuratedSandwichScreen({ visible, onClose, userPayload }: P
     } else {
       if (selected.length >= 8) {
         void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-        Alert.alert("Max 8 stocks", "Remove a stock before adding another.");
+        toast.showToast("Max 8 stocks — remove one before adding another", "error");
         return;
       }
       const next = [...selected, { stock, weightPct: 0 }];
@@ -166,8 +168,8 @@ export function CreateCuratedSandwichScreen({ visible, onClose, userPayload }: P
   }
 
   async function handlePublish() {
-    if (!name.trim()) { Alert.alert("Name your portfolio first"); return; }
-    if (selected.length < 1) { Alert.alert("Add at least one stock"); return; }
+    if (!name.trim()) { toast.showToast("Name your portfolio first", "error"); return; }
+    if (selected.length < 1) { toast.showToast("Add at least one stock", "error"); return; }
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
     Keyboard.dismiss();
@@ -208,12 +210,11 @@ export function CreateCuratedSandwichScreen({ visible, onClose, userPayload }: P
       }
 
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      Alert.alert("Published!", `"${name.trim()}" is now live.`, [
-        { text: "Done", onPress: handleClose },
-      ]);
+      toast.showToast(`"${name.trim()}" is now live`, "success");
+      handleClose();
     } catch (error) {
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      Alert.alert("Failed to publish", error instanceof Error ? error.message : "Unknown error");
+      toast.showToast(humanizeErrorMessage(error, "Couldn't publish. Try again."), "error");
     } finally {
       setPublishing(false);
     }
