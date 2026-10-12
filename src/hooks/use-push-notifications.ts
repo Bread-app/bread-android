@@ -47,15 +47,24 @@ export function usePushNotifications(): void {
     if (!user?.id) return;
 
     const go = (response: Notifications.NotificationResponse) => {
+      const data = response.notification.request.content.data as
+        | { route?: unknown; params?: unknown; notificationId?: unknown }
+        | undefined;
+      // Only a tap on one of Bread's pushes navigates. On Android,
+      // expo-notifications reports ANY launch or incoming intent that carries
+      // extras as a notification response: starting from the launcher, and the
+      // Google / X / wallet redirects back into the app during sign-in. Those
+      // carry none of our data, so the inbox fallback below opened Notifications
+      // on app start and at the end of onboarding. Every Bread push has a
+      // `notificationId`, so that is the test.
+      if (typeof data?.notificationId !== "string") return;
+
       const identifier = response.notification.request.identifier;
       if (identifier) {
         if (handledResponses.current.has(identifier)) return;
         handledResponses.current.add(identifier);
       }
-      const data = response.notification.request.content.data as
-        | { route?: unknown; params?: unknown; notificationId?: unknown }
-        | undefined;
-      if (typeof data?.notificationId === "string") void markNotificationsRead({ ids: [data.notificationId] }).catch(() => {});
+      void markNotificationsRead({ ids: [data.notificationId] }).catch(() => {});
       const route = typeof data?.route === "string" ? data.route : "/notifications";
       const rawParams = (data?.params ?? {}) as Record<string, unknown>;
       const params: Record<string, string> = {};
