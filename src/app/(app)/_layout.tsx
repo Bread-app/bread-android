@@ -252,6 +252,14 @@ export default function ProtectedAppLayout() {
                     }}
                   />
                   <Stack.Screen
+                    name="blocked-users"
+                    options={{
+                      headerShown: false,
+                      animation: 'slide_from_right',
+                      animationDuration: 200,
+                    }}
+                  />
+                  <Stack.Screen
                     name="activity"
                     options={{
                       headerShown: false,
