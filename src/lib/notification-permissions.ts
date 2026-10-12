@@ -68,6 +68,7 @@ export async function requestNotificationPermissionIfNeeded(): Promise<boolean> 
       if (current.status === "granted") return true;
       if (current.status !== "undetermined") return false;
 
+      await ensureAndroidChannels().catch(() => {});
       const requested = await Notifications.requestPermissionsAsync({
         ios: {
           allowAlert: true,
@@ -95,38 +96,46 @@ function expoProjectId(): string | null {
   );
 }
 
+/**
+ * One Android channel per preference category, so the OS-level toggles the
+ * user sees in system settings line up with the ones in the app instead of
+ * being a single all-or-nothing switch.
+ *
+ * Created BEFORE asking for permission: on Android 13+ the system notification
+ * prompt can fail to appear while the app has no channel at all. Creating a
+ * channel needs no permission, so this is safe to run first.
+ */
+async function ensureAndroidChannels(): Promise<void> {
+  if (Platform.OS !== "android") return;
+  await Promise.all([
+    Notifications.setNotificationChannelAsync("bread-money", {
+      name: "Trades & cash",
+      importance: Notifications.AndroidImportance.HIGH,
+      sound: "default",
+    }),
+    Notifications.setNotificationChannelAsync("bread-social", {
+      name: "Follows, likes & comments",
+      importance: Notifications.AndroidImportance.DEFAULT,
+      sound: "default",
+    }),
+    Notifications.setNotificationChannelAsync("bread-market", {
+      name: "Market moves",
+      importance: Notifications.AndroidImportance.DEFAULT,
+      sound: "default",
+    }),
+    Notifications.setNotificationChannelAsync("bread-product", {
+      name: "Tips & updates",
+      importance: Notifications.AndroidImportance.LOW,
+      sound: "default",
+    }),
+  ]);
+}
+
 export async function registerForPushNotificationsIfNeeded(): Promise<boolean> {
   if (!Device.isDevice) return false;
   const granted = await requestNotificationPermissionIfNeeded();
   if (!granted) return false;
-
-  // One Android channel per preference category, so the OS-level toggles the
-  // user sees in system settings line up with the ones in the app instead of
-  // being a single all-or-nothing switch.
-  if (Platform.OS === "android") {
-    await Promise.all([
-      Notifications.setNotificationChannelAsync("bread-money", {
-        name: "Trades & cash",
-        importance: Notifications.AndroidImportance.HIGH,
-        sound: "default",
-      }),
-      Notifications.setNotificationChannelAsync("bread-social", {
-        name: "Follows, likes & comments",
-        importance: Notifications.AndroidImportance.DEFAULT,
-        sound: "default",
-      }),
-      Notifications.setNotificationChannelAsync("bread-market", {
-        name: "Market moves",
-        importance: Notifications.AndroidImportance.DEFAULT,
-        sound: "default",
-      }),
-      Notifications.setNotificationChannelAsync("bread-product", {
-        name: "Tips & updates",
-        importance: Notifications.AndroidImportance.LOW,
-        sound: "default",
-      }),
-    ]);
-  }
+  await ensureAndroidChannels().catch(() => {});
 
   const projectId = expoProjectId();
   if (!projectId) return false;
