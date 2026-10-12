@@ -25,6 +25,7 @@ import { ToastProvider } from '@/lib/toast-store';
 import { TradeFxProvider } from '@/lib/trade-fx';
 import { WalletStoreProvider } from '@/lib/wallet-store';
 import { PUSH_TRANSITION } from '@/lib/screen-transitions';
+import { ANDROID_ROUTE_SHEET_OPTIONS, USES_ROUTE_SHEET_FRAME } from '@/components/route-sheet-frame';
 import { useThemeStore } from '@/lib/theme-store';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
 import type { ThemeColors } from '@/constants/theme';
@@ -338,7 +339,7 @@ export default function ProtectedAppLayout() {
                       flow moves between the method list and the amount pad. */}
                   <Stack.Screen
                     name="deposit"
-                    options={{
+                    options={USES_ROUTE_SHEET_FRAME ? ANDROID_ROUTE_SHEET_OPTIONS : {
                       headerShown: false,
                       presentation: 'formSheet',
                       sheetAllowedDetents: 'fitToContents',
@@ -352,7 +353,7 @@ export default function ProtectedAppLayout() {
                       fractional detents with a full-height flex root. */}
                   <Stack.Screen
                     name="sandwich-trade"
-                    options={{
+                    options={USES_ROUTE_SHEET_FRAME ? ANDROID_ROUTE_SHEET_OPTIONS : {
                       headerShown: false,
                       presentation: 'formSheet',
                       sheetAllowedDetents: 'fitToContents',
@@ -363,7 +364,7 @@ export default function ProtectedAppLayout() {
                   />
                   <Stack.Screen
                     name="stock-trade"
-                    options={{
+                    options={USES_ROUTE_SHEET_FRAME ? ANDROID_ROUTE_SHEET_OPTIONS : {
                       headerShown: false,
                       presentation: 'formSheet',
                       sheetAllowedDetents: [1],
@@ -378,7 +379,7 @@ export default function ProtectedAppLayout() {
                       sheet's bottom edge (see phoenix-position below). */}
                   <Stack.Screen
                     name="withdraw"
-                    options={{
+                    options={USES_ROUTE_SHEET_FRAME ? ANDROID_ROUTE_SHEET_OPTIONS : {
                       headerShown: false,
                       presentation: 'formSheet',
                       sheetAllowedDetents: [1],

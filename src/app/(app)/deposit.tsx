@@ -3,6 +3,7 @@ import { useRouter } from 'expo-router';
 import React, { useCallback } from 'react';
 import { StyleSheet, View } from 'react-native';
 
+import { RouteSheetFrame } from '@/components/route-sheet-frame';
 import { DepositFlow } from '@/components/deposit-sheet';
 import { useThemeStore } from '@/lib/theme-store';
 
@@ -23,9 +24,11 @@ export default function DepositRoute() {
   }, [router]);
 
   return (
-    <View style={[styles.sheet, { backgroundColor: colors.background }]}>
-      <DepositFlow walletAddress={walletAddress} dismiss={dismiss} host="native" />
-    </View>
+    <RouteSheetFrame>
+      <View style={[styles.sheet, { backgroundColor: colors.background }]}>
+        <DepositFlow walletAddress={walletAddress} dismiss={dismiss} host="native" />
+      </View>
+    </RouteSheetFrame>
   );
 }
 

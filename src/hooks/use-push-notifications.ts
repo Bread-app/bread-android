@@ -82,7 +82,11 @@ export function usePushNotifications(): void {
     // Cold start: the tap that opened the app. The live listener never sees it,
     // because it fired before this component mounted.
     void Notifications.getLastNotificationResponseAsync().then((response) => {
-      if (response) go(response);
+      if (!response) return;
+      // Consumed, not just remembered: Android can keep handing back the same
+      // response on later launches, which reopened the inbox on every start.
+      Notifications.clearLastNotificationResponse();
+      go(response);
     });
 
     const subscription = Notifications.addNotificationResponseReceivedListener(go);

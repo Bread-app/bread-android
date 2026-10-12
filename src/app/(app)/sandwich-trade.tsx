@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect } from 'react';
 import { StyleSheet, View, useWindowDimensions } from 'react-native';
 
+import { RouteSheetFrame } from '@/components/route-sheet-frame';
 import { useCash } from '@/hooks/use-cash';
 import { useSandwichTradeSheet } from '@/lib/sandwich-trade-sheet-store';
 import type { ToastState } from '@/lib/toast-state';
@@ -56,36 +57,38 @@ export default function SandwichTradeRoute() {
   const onRequestAddCash = useCallback(() => handlers.current.onRequestAddCash?.(), [handlers]);
 
   return (
-    <View
-      collapsable={false}
-      style={[
-        styles.sheet,
-        { height: sheetHeight, paddingBottom: 12 },
-      ]}
-    >
-      {side === 'sell' && position ? (
-        <SandwichSellPad
-          position={position}
-          sandwich={sandwich}
-          onClose={close}
-          onToast={onToast}
-          onCelebrate={onCelebrate}
-          onPositionUpdated={onPositionUpdated}
-        />
-      ) : sandwich ? (
-        <SandwichBuyPad
-          sandwich={sandwich}
-          onClose={close}
-          onToast={onToast}
-          onCelebrate={onCelebrate}
-          cash={cash}
-          walletStore={walletStore}
-          onRequestAddCash={handlers.current.onRequestAddCash ? onRequestAddCash : undefined}
-          onPositionUpdated={onPositionUpdated}
-          initialAmount={initialAmount}
-        />
-      ) : null}
-    </View>
+    <RouteSheetFrame>
+      <View
+        collapsable={false}
+        style={[
+          styles.sheet,
+          { height: sheetHeight, paddingBottom: 12 },
+        ]}
+      >
+        {side === 'sell' && position ? (
+          <SandwichSellPad
+            position={position}
+            sandwich={sandwich}
+            onClose={close}
+            onToast={onToast}
+            onCelebrate={onCelebrate}
+            onPositionUpdated={onPositionUpdated}
+          />
+        ) : sandwich ? (
+          <SandwichBuyPad
+            sandwich={sandwich}
+            onClose={close}
+            onToast={onToast}
+            onCelebrate={onCelebrate}
+            cash={cash}
+            walletStore={walletStore}
+            onRequestAddCash={handlers.current.onRequestAddCash ? onRequestAddCash : undefined}
+            onPositionUpdated={onPositionUpdated}
+            initialAmount={initialAmount}
+          />
+        ) : null}
+      </View>
+    </RouteSheetFrame>
   );
 }
 

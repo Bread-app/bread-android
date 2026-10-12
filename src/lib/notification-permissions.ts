@@ -55,9 +55,9 @@ Notifications.setNotificationHandler({
 });
 
 /**
- * Requests native notification permission once, only while the OS still
- * reports an undetermined status. A previous denial is respected and never
- * triggers another system prompt.
+ * Shows the native Allow / Don't allow prompt while the OS still permits
+ * asking (`canAskAgain`). Once the OS says the prompt is spent, a denial is
+ * respected and never triggers another system prompt.
  */
 export async function requestNotificationPermissionIfNeeded(): Promise<boolean> {
   if (permissionRequest) return permissionRequest;
@@ -66,7 +66,10 @@ export async function requestNotificationPermissionIfNeeded(): Promise<boolean> 
     try {
       const current = await Notifications.getPermissionsAsync();
       if (current.status === "granted") return true;
-      if (current.status !== "undetermined") return false;
+      // `canAskAgain`, not `status === "undetermined"`: Android reports a first
+      // "Don't allow" as denied but still lets the app ask once more, and the
+      // OS — not us — decides when the prompt is spent.
+      if (!current.canAskAgain) return false;
 
       await ensureAndroidChannels().catch(() => {});
       const requested = await Notifications.requestPermissionsAsync({

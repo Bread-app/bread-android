@@ -2,6 +2,7 @@ import { useRouter } from 'expo-router';
 import React, { useCallback } from 'react';
 import { StyleSheet, View } from 'react-native';
 
+import { RouteSheetFrame } from '@/components/route-sheet-frame';
 import { WithdrawFlow } from '@/components/withdraw-sheet';
 import { useThemeStore } from '@/lib/theme-store';
 
@@ -17,9 +18,11 @@ export default function WithdrawRoute() {
   }, [router]);
 
   return (
-    <View style={[styles.sheet, { backgroundColor: colors.background }]}>
-      <WithdrawFlow dismiss={dismiss} />
-    </View>
+    <RouteSheetFrame fill>
+      <View style={[styles.sheet, { backgroundColor: colors.background }]}>
+        <WithdrawFlow dismiss={dismiss} />
+      </View>
+    </RouteSheetFrame>
   );
 }
 
