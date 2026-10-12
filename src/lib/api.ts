@@ -1179,6 +1179,16 @@ type JsonRequestOptions = {
   signal?: AbortSignal;
 };
 
+/**
+ * GETs in flight, keyed by URL and credentials, so identical concurrent reads
+ * share one network request. Every tab mounts at launch and several screens
+ * ask for the same thing on the same tick — the profile, the deposit address
+ * and the stock list each went out four to six times at once. The TEXT is
+ * shared, never the parsed object, so no caller can mutate another's result.
+ */
+type SharedRead = { ok: boolean; status: number; text: string };
+const inflightGets = new Map<string, Promise<SharedRead>>();
+
 async function requestJson<T>(path: string, options: JsonRequestOptions = {}): Promise<T> {
   const method = options.method ?? 'GET';
 
@@ -1230,19 +1240,52 @@ async function requestJson<T>(path: string, options: JsonRequestOptions = {}): P
     else options.signal.addEventListener('abort', abortFromCaller);
   }
 
-  try {
-    const response = await fetch(url.toString(), {
-      method,
-      signal: controller.signal,
-      headers: {
-        Accept: 'application/json',
-        ...authHeaders,
-        ...(method !== 'GET' ? { 'Content-Type': 'application/json' } : {}),
-      },
-      ...(method !== 'GET' ? { body: JSON.stringify(options.body ?? {}) } : {}),
-    });
+  // A caller-cancellable read is never shared: its cancel would abort everyone.
+  const shareKey =
+    method === 'GET' && !options.signal
+      ? `${url.toString()}|${(authHeaders as Record<string, string>).Authorization ?? ''}`
+      : null;
 
-    const responseText = await response.text();
+  try {
+    const read = async (): Promise<SharedRead> => {
+      const response = await fetch(url.toString(), {
+        method,
+        signal: controller.signal,
+        headers: {
+          Accept: 'application/json',
+          ...authHeaders,
+          ...(method !== 'GET' ? { 'Content-Type': 'application/json' } : {}),
+        },
+        ...(method !== 'GET' ? { body: JSON.stringify(options.body ?? {}) } : {}),
+      });
+      return { ok: response.ok, status: response.status, text: await response.text() };
+    };
+
+    let pending = shareKey ? inflightGets.get(shareKey) : undefined;
+    if (!pending) {
+      pending = read();
+      if (shareKey) {
+        const key = shareKey;
+        const own = pending;
+        inflightGets.set(key, own);
+        void own.catch(() => {}).finally(() => {
+          if (inflightGets.get(key) === own) inflightGets.delete(key);
+        });
+      }
+    }
+    // A joined read keeps its OWN deadline: the shared fetch carries the first
+    // caller's signal, so this caller's timer has to be able to give up on it.
+    const timedOut = new Promise<never>((_, reject) => {
+      controller.signal.addEventListener('abort', () => {
+        const abort = new Error('Aborted');
+        abort.name = 'AbortError';
+        reject(abort);
+      });
+    });
+    void timedOut.catch(() => {});
+    const shared = await Promise.race([pending, timedOut]);
+    const response = { ok: shared.ok, status: shared.status };
+    const responseText = shared.text;
     let parsed: unknown;
 
     try {

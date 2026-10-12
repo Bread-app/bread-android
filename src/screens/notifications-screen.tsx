@@ -145,8 +145,19 @@ export function NotificationsScreen() {
     category,
     setCategory,
     markRead,
+    markAllRead,
     markSeen,
   } = useNotifications();
+
+  // Driven by the loaded rows, not the badge: `markSeen` zeroes the badge on
+  // open while rows stay unread, so the badge would grey this out immediately.
+  const hasUnread = useMemo(() => notifications.some((row) => !row.read), [notifications]);
+
+  const onMarkAllRead = useCallback(() => {
+    if (!hasUnread) return;
+    void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    void markAllRead();
+  }, [hasUnread, markAllRead]);
 
   const [refreshing, setRefreshing] = useState(false);
   const [profileUserId, setProfileUserId] = useState<string | null>(null);
@@ -208,8 +219,21 @@ export function NotificationsScreen() {
             <Ionicons name="chevron-back" size={24} color={colors.text} />
           </Pressable>
           <Text style={styles.headerTitle}>Notifications</Text>
-          {/* Mirrors the back button so the title stays centred. */}
-          <View style={styles.backBtn} />
+          {/* Same footprint as the back button so the title stays centred. */}
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Mark all as read"
+            accessibilityState={{ disabled: !hasUnread }}
+            disabled={!hasUnread}
+            hitSlop={10}
+            onPress={onMarkAllRead}
+            style={({ pressed }) => [styles.backBtn, pressed && styles.pressed]}>
+            <Ionicons
+              name="checkmark-done"
+              size={24}
+              color={hasUnread ? colors.text : colors.iconMuted}
+            />
+          </Pressable>
         </View>
 
         <View style={styles.filterRow}>
@@ -234,7 +258,7 @@ export function NotificationsScreen() {
         </View>
       </View>
     ),
-    [category, colors.text, router, setCategory, styles],
+    [category, colors.iconMuted, colors.text, hasUnread, onMarkAllRead, router, setCategory, styles],
   );
 
   // A notification that lands while the inbox is open rises in; rows already
@@ -339,6 +363,7 @@ const makeStyles = (c: ThemeColors) =>
       backgroundColor: c.background,
     },
     backBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
+    pressed: { opacity: 0.5 },
     headerTitle: { fontFamily: F, fontWeight: '800', fontSize: 18, color: c.text },
     filterRow: {
       flexDirection: 'row',
