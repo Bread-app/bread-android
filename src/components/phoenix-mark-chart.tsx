@@ -746,6 +746,16 @@ export const PhoenixMarkChart = React.memo(function PhoenixMarkChart({
     },
   );
 
+  // The throttle above only fires on a change, so the last few frames of a
+  // gesture can fall inside its window and never reach React — the price scale
+  // and clock labels then stay a step behind where the candles came to rest.
+  // Every way the window stops moving calls this once to land them exactly.
+  const flushLabels = useCallback(() => {
+    'worklet';
+    lastSyncSV.value = Date.now();
+    runOnJS(syncLabels)({ count: countSV.value, offset: offsetSV.value, yZoom: yZoomSV.value });
+  }, [countSV, lastSyncSV, offsetSV, syncLabels, yZoomSV]);
+
   const moveCrosshair = useCallback(
     (x: number, y: number) => {
       const { count, offset } = clampWindow(total, countSV.value, offsetSV.value);
@@ -979,16 +989,30 @@ export const PhoenixMarkChart = React.memo(function PhoenixMarkChart({
         'worklet';
         if (axisStretchSV.value) {
           axisStretchSV.value = false;
+          flushLabels();
           return;
         }
-        if (pinchingSV.value || crosshairSV.value) return;
+        // A pinch lands its own labels when it finalizes.
+        if (pinchingSV.value) return;
+        if (crosshairSV.value) {
+          flushLabels();
+          return;
+        }
         const slot = plotWidth / Math.max(1, clampWindow(total, countSV.value, offsetSV.value).count);
         // Momentum, decayed on the UI thread and clamped at both ends of the
         // series so it stops at the edge instead of rubber-banding past it.
-        offsetSV.value = withDecay({
-          velocity: event.velocityX / slot,
-          clamp: [0, Math.max(0, total - countSV.value)],
-        });
+        offsetSV.value = withDecay(
+          {
+            velocity: event.velocityX / slot,
+            clamp: [0, Math.max(0, total - countSV.value)],
+          },
+          // Labels land where the fling actually stops. A fling cut short by
+          // a new touch is landed by that gesture instead.
+          (finished) => {
+            'worklet';
+            if (finished) flushLabels();
+          },
+        );
       });
 
     const pinch = Gesture.Pinch()
@@ -1026,6 +1050,7 @@ export const PhoenixMarkChart = React.memo(function PhoenixMarkChart({
           count: settled.count,
           offset: settled.offset - panTravelSV.value / (plotWidth / settled.count),
         };
+        flushLabels();
       });
 
     const reset = Gesture.Tap()
@@ -1054,6 +1079,7 @@ export const PhoenixMarkChart = React.memo(function PhoenixMarkChart({
     clearCrosshair,
     countSV,
     defaultCount,
+    flushLabels,
     crosshairSV,
     crosshairXSV,
     crosshairYSV,
@@ -1152,6 +1178,10 @@ export const PhoenixMarkChart = React.memo(function PhoenixMarkChart({
         const next = clampWindow(total, base.count * factor, base.offset);
         countSV.value = next.count;
         offsetSV.value = next.offset;
+      })
+      .onEnd(() => {
+        'worklet';
+        flushLabels();
       });
 
     const reset = Gesture.Tap()
@@ -1159,11 +1189,12 @@ export const PhoenixMarkChart = React.memo(function PhoenixMarkChart({
       .onEnd(() => {
         'worklet';
         countSV.value = Math.min(FOCUSED_CANDLES, Math.max(1, Math.min(total, MAX_VISIBLE)));
+        flushLabels();
         runOnJS(tapFeedback)();
       });
 
     return Gesture.Simultaneous(drag, reset);
-  }, [countSV, offsetSV, plotWidth, tapFeedback, timeZoomStart, total]);
+  }, [countSV, flushLabels, offsetSV, plotWidth, tapFeedback, timeZoomStart, total]);
 
   // ---- trigger dragging (the auto-close pad's mode) -----------------------
   const draggingRef = useRef<TriggerLeg | null>(null);
