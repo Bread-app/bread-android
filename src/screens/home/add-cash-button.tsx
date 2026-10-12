@@ -32,6 +32,8 @@ export function AddCashButton({ onPress }: Props) {
       labelDesign="rounded"
       width={WIDTH}
       height={HEIGHT}
+      // What iOS 26 renders this glass as over the board (sampled on device).
+      fallbackFill="#C8FFFF"
       onPress={onPress}
     />
   );

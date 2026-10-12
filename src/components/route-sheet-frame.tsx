@@ -26,12 +26,17 @@ export const ANDROID_ROUTE_SHEET_OPTIONS = {
 export const USES_ROUTE_SHEET_FRAME = Platform.OS === 'android';
 
 const SHEET_TOP_GAP = 12;
+/** iOS 26 floats its sheets: inset from the screen edges, every corner round. */
+const SHEET_SIDE_INSET = 10;
+const SHEET_BOTTOM_GAP = 10;
+const SHEET_RADIUS = 36;
 const SLIDE_IN = SlideInDown.duration(260).reduceMotion(ReduceMotion.System);
 const BACKDROP_IN = FadeIn.duration(200).reduceMotion(ReduceMotion.System);
 
 /**
  * The sheet chrome for a form-sheet route on Android: a dimmed backdrop that
- * dismisses on tap, and a bottom-anchored card that clears the navigation bar.
+ * dismisses on tap, and a card that floats above the navigation bar, inset
+ * from the edges with every corner rounded — the iOS 26 sheet's shape.
  * On iOS the native sheet already provides all of this, so it renders the
  * children untouched.
  *
@@ -56,7 +61,8 @@ export function RouteSheetFrame({
 
   if (!USES_ROUTE_SHEET_FRAME) return <>{children}</>;
 
-  const maxHeight = height - insets.top - SHEET_TOP_GAP;
+  const bottom = insets.bottom + SHEET_BOTTOM_GAP;
+  const maxHeight = height - insets.top - SHEET_TOP_GAP - bottom;
   return (
     <View style={StyleSheet.absoluteFill}>
       <Animated.View entering={BACKDROP_IN} style={[StyleSheet.absoluteFill, styles.backdrop]}>
@@ -73,7 +79,7 @@ export function RouteSheetFrame({
           styles.card,
           {
             backgroundColor: colors.background,
-            paddingBottom: insets.bottom,
+            bottom,
             maxHeight,
           },
           fill && { height: maxHeight },
@@ -90,11 +96,10 @@ const styles = StyleSheet.create({
   },
   card: {
     position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
+    left: SHEET_SIDE_INSET,
+    right: SHEET_SIDE_INSET,
+    borderRadius: SHEET_RADIUS,
     overflow: 'hidden',
+    boxShadow: '0px 12px 40px rgba(0,0,0,0.22)',
   },
 });

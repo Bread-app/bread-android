@@ -30,6 +30,12 @@ export type GlassActionButtonProps = {
   width: number;
   height: number;
   onPress: () => void;
+  /**
+   * The colour iOS 26's glass actually renders as on this button's backdrop,
+   * for the hand-drawn path. White `glassProminent` over Home's blue board
+   * comes out cyan (#C8FFFF), not white.
+   */
+  fallbackFill?: string;
 };
 
 /**
@@ -56,6 +62,7 @@ export function GlassActionButton({
   width,
   height,
   onPress,
+  fallbackFill,
 }: GlassActionButtonProps) {
   const { scheme } = useThemeStore();
 
@@ -81,7 +88,9 @@ export function GlassActionButton({
   // louder button than iOS 26 draws. Hence: prominent takes the tint, plain
   // takes the neutral translucent chip.
   const isProminent = variant === 'glassProminent';
-  const fill = isProminent
+  const fill = fallbackFill
+    ? fallbackFill
+    : isProminent
     ? tint
     : scheme === 'dark'
       ? 'rgba(120, 120, 128, 0.36)'
