@@ -5,6 +5,7 @@ import * as Haptics from "expo-haptics";
 import { setStatusBarStyle } from "expo-status-bar";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  Platform,
   RefreshControl,
   StyleSheet,
   Text,
@@ -64,7 +65,7 @@ import { useHomePortfolio } from "./use-home-portfolio";
  */
 export function HomeScreen() {
   const styles = useThemedStyles(makeStyles);
-  const { scheme } = useThemeStore();
+  const { scheme, colors } = useThemeStore();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const composer = useSandwichComposer();
@@ -421,39 +422,64 @@ export function HomeScreen() {
         style={[styles.edge, edgeStyle, { top: barHeight }]}
         pointerEvents="none"
       >
-        <MaskedView
-          style={StyleSheet.absoluteFill}
-          maskElement={
-            <Svg width={width} height={EDGE_HEIGHT}>
-              <Defs>
-                <SvgGradient
-                  id="edge-fade"
-                  x1="0"
-                  y1="0"
-                  x2="0"
-                  y2={EDGE_HEIGHT}
-                  gradientUnits="userSpaceOnUse"
-                >
-                  <Stop offset="0" stopColor="#000000" stopOpacity="1" />
-                  <Stop offset="0.5" stopColor="#000000" stopOpacity="0.5" />
-                  <Stop offset="1" stopColor="#000000" stopOpacity="0" />
-                </SvgGradient>
-              </Defs>
-              {/* The mask carries BOTH jobs: the vertical fall-off, and the
-                  sheet's own rounded top. A plain rectangular fade blurs the
-                  ground outside the curve as well, and that smudge in the
-                  corners is visible against the dark board. */}
-              <Path d={edgeMaskPath} fill="url(#edge-fade)" />
-            </Svg>
-          }
-        >
-          <BlurView
-            intensity={EDGE_BLUR}
-            tint={scheme === "dark" ? "dark" : "light"}
-            experimentalBlurMethod="dimezisBlurView"
+        {Platform.OS === "android" ? (
+          // Android: no live blur. A real-time blur behind a mask re-renders
+          // the feed under it on every scroll frame, the costliest thing on
+          // Home on mid-range phones. The same silhouette, filled with a fade
+          // of the sheet's own colour, reads the same at this size and is
+          // drawn once — scrolling only moves it.
+          <Svg width={width} height={EDGE_HEIGHT}>
+            <Defs>
+              <SvgGradient
+                id="edge-fade-flat"
+                x1="0"
+                y1="0"
+                x2="0"
+                y2={EDGE_HEIGHT}
+                gradientUnits="userSpaceOnUse"
+              >
+                <Stop offset="0" stopColor={colors.background} stopOpacity="0.92" />
+                <Stop offset="0.5" stopColor={colors.background} stopOpacity="0.45" />
+                <Stop offset="1" stopColor={colors.background} stopOpacity="0" />
+              </SvgGradient>
+            </Defs>
+            <Path d={edgeMaskPath} fill="url(#edge-fade-flat)" />
+          </Svg>
+        ) : (
+          <MaskedView
             style={StyleSheet.absoluteFill}
-          />
-        </MaskedView>
+            maskElement={
+              <Svg width={width} height={EDGE_HEIGHT}>
+                <Defs>
+                  <SvgGradient
+                    id="edge-fade"
+                    x1="0"
+                    y1="0"
+                    x2="0"
+                    y2={EDGE_HEIGHT}
+                    gradientUnits="userSpaceOnUse"
+                  >
+                    <Stop offset="0" stopColor="#000000" stopOpacity="1" />
+                    <Stop offset="0.5" stopColor="#000000" stopOpacity="0.5" />
+                    <Stop offset="1" stopColor="#000000" stopOpacity="0" />
+                  </SvgGradient>
+                </Defs>
+                {/* The mask carries BOTH jobs: the vertical fall-off, and the
+                    sheet's own rounded top. A plain rectangular fade blurs the
+                    ground outside the curve as well, and that smudge in the
+                    corners is visible against the dark board. */}
+                <Path d={edgeMaskPath} fill="url(#edge-fade)" />
+              </Svg>
+            }
+          >
+            <BlurView
+              intensity={EDGE_BLUR}
+              tint={scheme === "dark" ? "dark" : "light"}
+              experimentalBlurMethod="dimezisBlurView"
+              style={StyleSheet.absoluteFill}
+            />
+          </MaskedView>
+        )}
       </Animated.View>
 
       {/* The sheet's rounded shoulders, redrawn just BELOW the bar. The real

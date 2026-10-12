@@ -24,7 +24,7 @@ import { SavedStoreProvider } from '@/lib/saved-store';
 import { ToastProvider } from '@/lib/toast-store';
 import { TradeFxProvider } from '@/lib/trade-fx';
 import { WalletStoreProvider } from '@/lib/wallet-store';
-import { PUSH_TRANSITION } from '@/lib/screen-transitions';
+import { PUSH_TRANSITION, ZOOM_ROUTE_TRANSITION } from '@/lib/screen-transitions';
 import { ANDROID_ROUTE_SHEET_OPTIONS, androidNativeSheetOptions, USES_ROUTE_SHEET_FRAME } from '@/components/route-sheet-frame';
 import { useThemeStore } from '@/lib/theme-store';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
@@ -128,7 +128,7 @@ export default function ProtectedAppLayout() {
                       // stack replaces it with UIKit's zoom only when a tapped
                       // SandwichCard has marked itself as the source. Deep links
                       // with no source retain the normal push.
-                      animation: 'default',
+                      ...ZOOM_ROUTE_TRANSITION,
                     }}
                   />
                   {/* One YouTube episode and every market it produced. Same
@@ -331,14 +331,15 @@ export default function ProtectedAppLayout() {
                       pull-down away and dismisses with the edge-swipe back,
                       which zooms out to the row just the same.
 
-                      `animation` must stay 'default': react-native-screens
+                      On iOS `animation` must stay 'default': react-native-screens
                       returns a custom animator for every other value, and a
-                      custom animator overrides `preferredTransition`. */}
+                      custom animator overrides `preferredTransition`. Android
+                      has no zoom and slides in (ZOOM_ROUTE_TRANSITION). */}
                   <Stack.Screen
                     name="stock-detail-native"
                     options={{
                       headerShown: false,
-                      animation: 'default',
+                      ...ZOOM_ROUTE_TRANSITION,
                     }}
                   />
                   {/* TRIAL: the deposit flow as a real UISheetPresentationController
