@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect } from 'react';
 import { StyleSheet, View, useWindowDimensions } from 'react-native';
 
-import { RouteSheetFrame } from '@/components/route-sheet-frame';
+import { NativeSheetRoot, USES_ROUTE_SHEET_FRAME } from '@/components/route-sheet-frame';
 import { useCash } from '@/hooks/use-cash';
 import { useSandwichTradeSheet } from '@/lib/sandwich-trade-sheet-store';
 import type { ToastState } from '@/lib/toast-state';
@@ -57,12 +57,13 @@ export default function SandwichTradeRoute() {
   const onRequestAddCash = useCallback(() => handlers.current.onRequestAddCash?.(), [handlers]);
 
   return (
-    <RouteSheetFrame>
+    <NativeSheetRoot>
       <View
         collapsable={false}
         style={[
           styles.sheet,
-          { height: sheetHeight, paddingBottom: 12 },
+          // Android's native sheet has a fixed detent, so the pad fills it.
+        USES_ROUTE_SHEET_FRAME ? { flex: 1, paddingBottom: 12 } : { height: sheetHeight, paddingBottom: 12 },
         ]}
       >
         {side === 'sell' && position ? (
@@ -88,7 +89,7 @@ export default function SandwichTradeRoute() {
           />
         ) : null}
       </View>
-    </RouteSheetFrame>
+    </NativeSheetRoot>
   );
 }
 

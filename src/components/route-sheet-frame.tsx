@@ -1,6 +1,7 @@
 import { useRouter } from 'expo-router';
 import React, { useCallback } from 'react';
 import { Platform, Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import Animated, { FadeIn, ReduceMotion, SlideInDown } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -24,6 +25,39 @@ export const ANDROID_ROUTE_SHEET_OPTIONS = {
 } as const;
 
 export const USES_ROUTE_SHEET_FRAME = Platform.OS === 'android';
+
+/**
+ * Stack options for a route Android presents as its own native (Material)
+ * bottom sheet, with the drag handle. `detent` is the sheet's height as a
+ * fraction of the screen. Pair the route's content with {@link NativeSheetRoot}.
+ */
+export function androidNativeSheetOptions(detent: number, backgroundColor: string) {
+  return {
+    headerShown: false,
+    presentation: 'formSheet' as const,
+    sheetAllowedDetents: [detent],
+    sheetGrabberVisible: true,
+    sheetCornerRadius: 28,
+    contentStyle: { backgroundColor },
+  };
+}
+
+/**
+ * Root for content inside an Android native sheet. The sheet is its own
+ * window, so gesture-handler gestures in it (slide-to-buy, the allocation
+ * ruler) need their own GestureHandlerRootView or they never activate — the
+ * "broken slider" in these sheets. It also clears the navigation bar, which
+ * the native sheet does not inset for. On iOS it renders the children as-is.
+ */
+export function NativeSheetRoot({ children }: { children: React.ReactNode }) {
+  const insets = useSafeAreaInsets();
+  if (Platform.OS !== 'android') return <>{children}</>;
+  return (
+    <GestureHandlerRootView style={[styles.nativeRoot, { paddingBottom: insets.bottom }]}>
+      {children}
+    </GestureHandlerRootView>
+  );
+}
 
 const SHEET_TOP_GAP = 12;
 /** iOS 26 floats its sheets: inset from the screen edges, every corner round. */
@@ -91,6 +125,7 @@ export function RouteSheetFrame({
 }
 
 const styles = StyleSheet.create({
+  nativeRoot: { flex: 1 },
   backdrop: {
     backgroundColor: 'rgba(0,0,0,0.5)',
   },

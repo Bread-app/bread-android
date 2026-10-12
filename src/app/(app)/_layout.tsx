@@ -25,7 +25,7 @@ import { ToastProvider } from '@/lib/toast-store';
 import { TradeFxProvider } from '@/lib/trade-fx';
 import { WalletStoreProvider } from '@/lib/wallet-store';
 import { PUSH_TRANSITION } from '@/lib/screen-transitions';
-import { ANDROID_ROUTE_SHEET_OPTIONS, USES_ROUTE_SHEET_FRAME } from '@/components/route-sheet-frame';
+import { ANDROID_ROUTE_SHEET_OPTIONS, androidNativeSheetOptions, USES_ROUTE_SHEET_FRAME } from '@/components/route-sheet-frame';
 import { useThemeStore } from '@/lib/theme-store';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
 import type { ThemeColors } from '@/constants/theme';
@@ -353,7 +353,7 @@ export default function ProtectedAppLayout() {
                       fractional detents with a full-height flex root. */}
                   <Stack.Screen
                     name="sandwich-trade"
-                    options={USES_ROUTE_SHEET_FRAME ? ANDROID_ROUTE_SHEET_OPTIONS : {
+                    options={USES_ROUTE_SHEET_FRAME ? androidNativeSheetOptions(0.9, colors.background) : {
                       headerShown: false,
                       presentation: 'formSheet',
                       sheetAllowedDetents: 'fitToContents',
@@ -364,7 +364,7 @@ export default function ProtectedAppLayout() {
                   />
                   <Stack.Screen
                     name="stock-trade"
-                    options={USES_ROUTE_SHEET_FRAME ? ANDROID_ROUTE_SHEET_OPTIONS : {
+                    options={USES_ROUTE_SHEET_FRAME ? androidNativeSheetOptions(0.95, colors.background) : {
                       headerShown: false,
                       presentation: 'formSheet',
                       sheetAllowedDetents: [1],
