@@ -163,7 +163,13 @@ export const Fonts = Platform.select({
   default: {
     sans: 'normal',
     serif: 'serif',
-    rounded: 'normal',
+    /**
+     * Nunito, the closest open match to SF Rounded. Registered as one Android
+     * font family (400–900) by the expo-font plugin in app.json, so
+     * `fontWeight` still picks the face — with 'normal' (Roboto) every 800/900
+     * label collapsed to plain bold and the app read nothing like iOS.
+     */
+    rounded: 'Nunito',
     mono: 'monospace',
     display: 'Rubik_900Black',
     displayMedium: 'Rubik_700Bold',
