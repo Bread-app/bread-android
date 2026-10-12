@@ -26,7 +26,8 @@ import { Fonts, type ThemeColors } from '@/constants/theme';
 import { getSheetColors } from '@/lib/sheet-colors';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
 import { withAlpha } from '@/lib/color-utils';
-import { CTA } from '@/lib/screen-corners';
+import { CTA, ctaBottomInset } from '@/lib/screen-corners';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useThemeStore } from '@/lib/theme-store';
 import {
   NUMERIC_KEYPAD_FONT_SIZE,
@@ -165,6 +166,7 @@ export function PhoenixOrderPad({
   onAutoClose,
 }: PhoenixOrderPadProps) {
   const styles = useThemedStyles(makeStyles);
+  const insets = useSafeAreaInsets();
   const { colors, scheme } = useThemeStore();
   const isDark = scheme === 'dark';
 
@@ -280,7 +282,9 @@ export function PhoenixOrderPad({
   );
 
   return (
-    <View style={styles.root}>
+    // The card runs to the screen's bottom edge: on Android that is under the
+    // navigation bar, so the slide-to-trade CTA has to clear it.
+    <View style={[styles.root, { paddingBottom: ctaBottomInset(insets.bottom) }]}>
       <View style={styles.marketHeader}>
         <View style={styles.assetIdentity}>
           <AssetLogo
