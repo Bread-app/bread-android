@@ -5,8 +5,9 @@ const STORAGE_PREFIX = 'bread_onboarding_v2_';
 
 export type OnboardingStep = 'x' | 'username' | 'avatar';
 
-// `x` sits first so the X link reads as the second half of signing in.
-const STEPS: OnboardingStep[] = ['x', 'username', 'avatar'];
+// The X link is no longer part of onboarding; users connect X later from Like
+// to Buy. `x` stays in the type so a saved state that lists it still parses.
+const STEPS: OnboardingStep[] = ['username', 'avatar'];
 
 type OnboardingState = {
   completedSteps: OnboardingStep[];
