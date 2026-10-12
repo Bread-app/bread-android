@@ -27,15 +27,47 @@ export default function UsernameScreen() {
   const [available, setAvailable] = useState<boolean | null>(null);
   const [validationError, setValidationError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [checkFailed, setCheckFailed] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Every keystroke starts a check and none are cancelled, so answers can land
+  // out of order; only the latest one may touch the screen.
+  const checkSeq = useRef(0);
 
   const privyUserId = user?.id ?? null;
+
+  // One quiet retry: a single dropped request on mobile data used to leave
+  // "could not check" and a dead continue button until the user retyped.
+  const runCheck = useCallback(async (name: string) => {
+    const seq = ++checkSeq.current;
+    setChecking(true);
+    setCheckFailed(false);
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const res = await checkUsername(name);
+        if (seq !== checkSeq.current) return;
+        setAvailable(res.available);
+        setValidationError(res.available ? null : 'already taken');
+        setChecking(false);
+        return;
+      } catch {
+        if (seq !== checkSeq.current) return;
+        if (attempt === 0) await new Promise((resolve) => setTimeout(resolve, 700));
+      }
+    }
+    if (seq !== checkSeq.current) return;
+    setCheckFailed(true);
+    setChecking(false);
+  }, []);
 
   const handleChange = useCallback((text: string) => {
     const cleaned = text.toLowerCase().replace(/[^a-z0-9_]/g, '');
     setUsername(cleaned);
     setAvailable(null);
     setValidationError(null);
+    setCheckFailed(false);
+    // Invalidates any check still in flight for the previous text.
+    checkSeq.current++;
+    setChecking(false);
 
     if (debounceRef.current) clearTimeout(debounceRef.current);
 
@@ -53,18 +85,8 @@ export default function UsernameScreen() {
     }
 
     setChecking(true);
-    debounceRef.current = setTimeout(async () => {
-      try {
-        const res = await checkUsername(cleaned);
-        setAvailable(res.available);
-        if (!res.available) setValidationError('already taken');
-      } catch {
-        setValidationError('could not check');
-      } finally {
-        setChecking(false);
-      }
-    }, 300);
-  }, []);
+    debounceRef.current = setTimeout(() => void runCheck(cleaned), 300);
+  }, [runCheck]);
 
   useEffect(() => {
     return () => {
@@ -127,6 +149,10 @@ export default function UsernameScreen() {
 
       {validationError ? (
         <Text style={styles.errorText}>{validationError}</Text>
+      ) : checkFailed ? (
+        <Pressable accessibilityRole="button" hitSlop={8} onPress={() => void runCheck(username)}>
+          <Text style={styles.errorText}>{"couldn't check, tap to retry"}</Text>
+        </Pressable>
       ) : username.length >= 3 && available === true ? (
         <HandleText style={styles.successText}>{`@${username} is available`}</HandleText>
       ) : null}
