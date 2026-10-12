@@ -1,6 +1,7 @@
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import Foundation from '@expo/vector-icons/Foundation';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
+import MaskedView from '@react-native-masked-view/masked-view';
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
@@ -10,6 +11,14 @@ import Animated, { useAnimatedStyle, useSharedValue, withSpring, withTiming } fr
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useThemeStore } from '@/lib/theme-store';
+
+/** `#rrggbb` + alpha → rgba(); anything else is returned unchanged. */
+function withAlphaHex(color: string, alpha: number): string {
+  const match = /^#([0-9a-f]{6})$/i.exec(color);
+  if (!match) return color;
+  const n = parseInt(match[1], 16);
+  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${alpha})`;
+}
 
 const ICON_SIZE = 26;
 const BAR_HEIGHT = 56;
@@ -56,16 +65,14 @@ function TabIcon({ name, color }: { name: string; color: string }) {
 }
 
 /**
- * The pre-iOS-26 tab bar.
+ * The floating tab bar for Android and pre-iOS-26.
  *
  * iOS 26 draws the bottom bar as floating Liquid Glass capsules with the search
  * tab split off to the trailing side, and `NativeTabs` gets all of that from the
- * system. Older iOS has no such bar — it draws the flat, edge-to-edge chrome
- * bar instead — so this redraws the same shape by hand: two rounded capsules
- * over a blur and the same icon set. The active icon changes color without a
- * selection chip, matching the native bar's indicator-free treatment. Not
- * glass, but the same silhouette, so the app reads as one design
- * across both.
+ * system. Elsewhere this redraws it by hand: two capsules of real blur (Dimezis
+ * on Android) with only a whisper of tint, a specular rim that catches light
+ * top-left and bottom-right, a soft top sheen, and a tinted glass lens that
+ * slides between tabs.
  *
  * It floats (absolutely positioned, `box-none`) exactly as the real one does,
  * so content scrolls underneath rather than being cut off above it.
@@ -77,23 +84,26 @@ export function FloatingTabBar({ state, descriptors, navigation }: BottomTabBarP
 
   const activeColor = colors.actionPrimary;
   const inactiveColor = colors.textTertiary;
-  // Glass is mostly the blur underneath — the flat wash on top is only there to
-  // give the material body and keep the icons legible over busy content. Too
-  // much of it and the capsule stops being glass and becomes a painted pill.
-  const capsuleTint = isDark ? 'rgba(28,28,30,0.34)' : 'rgba(255,255,255,0.34)';
+  // Liquid Glass is the blur doing almost all the work: content behind stays
+  // readable as soft colour. Every flat wash stacked on top turns it back into a
+  // painted pill (the old bar summed to ~opaque white), so the body tint is
+  // barely there and the "glass" comes from light on the edges instead.
+  const capsuleTint = isDark ? 'rgba(18,18,22,0.18)' : 'rgba(255,255,255,0.10)';
   // Separation from a white page has to come from a faintly darker outer edge;
-  // a white one vanishes. The bright edge goes *inside* it instead, where it
-  // reads as the thickness of the material rather than as a border.
-  const rimColor = isDark ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.06)';
-  const innerEdgeColor = isDark ? 'rgba(255,255,255,0.16)' : 'rgba(255,255,255,0.75)';
-  // The specular sheen: brightest along the top, dimmest through the middle,
-  // with a slight lift again at the bottom where real glass catches the ground.
+  // a white one vanishes.
+  const rimColor = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.07)';
+  // The specular rim: light catching the curved edge — brightest top-left,
+  // fading through the sides, picking up again bottom-right.
+  const rimLight: [string, string, string, string] = isDark
+    ? ['rgba(255,255,255,0.55)', 'rgba(255,255,255,0.06)', 'rgba(255,255,255,0.04)', 'rgba(255,255,255,0.28)']
+    : ['rgba(255,255,255,1)', 'rgba(255,255,255,0.35)', 'rgba(255,255,255,0.25)', 'rgba(255,255,255,0.9)'];
+  // A soft top sheen, clear through the middle, a faint lift at the bottom.
   const sheen: [string, string, string] = isDark
-    ? ['rgba(255,255,255,0.16)', 'rgba(255,255,255,0.02)', 'rgba(255,255,255,0.07)']
-    : ['rgba(255,255,255,0.70)', 'rgba(255,255,255,0.14)', 'rgba(255,255,255,0.40)'];
-  // Android keeps a selection lens: Material users expect an active indicator,
-  // and the lens slides between tabs instead of blinking.
-  const selectionColor = isDark ? 'rgba(120,120,128,0.34)' : 'rgba(120,120,128,0.20)';
+    ? ['rgba(255,255,255,0.10)', 'rgba(255,255,255,0)', 'rgba(255,255,255,0.03)']
+    : ['rgba(255,255,255,0.42)', 'rgba(255,255,255,0)', 'rgba(255,255,255,0.16)'];
+  // The selection lens is its own little piece of tinted glass.
+  const selectionColor = withAlphaHex(activeColor, isDark ? 0.22 : 0.14);
+  const lensRim = isDark ? 'rgba(255,255,255,0.18)' : 'rgba(255,255,255,0.85)';
 
   const routeByName = new Map(state.routes.map((route) => [route.name, route]));
 
@@ -189,18 +199,21 @@ export function FloatingTabBar({ state, descriptors, navigation }: BottomTabBarP
           truly blurs with the Dimezis method; without it expo-blur falls back
           to a flat translucent tint and the bar stops reading as glass. */}
       <BlurView
-        intensity={IS_ANDROID ? (isDark ? 60 : 72) : isDark ? 70 : 90}
+        intensity={IS_ANDROID ? 40 : isDark ? 60 : 70}
         tint={
           IS_ANDROID
             ? isDark
-              ? 'dark'
-              : 'light'
+              ? 'systemUltraThinMaterialDark'
+              : 'default'
             : isDark
-              ? 'systemThinMaterialDark'
-              : 'systemThinMaterialLight'
+              ? 'systemUltraThinMaterialDark'
+              : 'systemUltraThinMaterialLight'
         }
         experimentalBlurMethod={IS_ANDROID ? 'dimezisBlurView' : undefined}
-        blurReductionFactor={IS_ANDROID ? 3 : undefined}
+        // Android: radius = intensity / factor, while the white/grey overlay
+        // scales with intensity alone — a low factor buys a strong blur without
+        // the milky overlay that made the bar opaque.
+        blurReductionFactor={IS_ANDROID ? 1.6 : undefined}
         style={StyleSheet.absoluteFill}
       />
       <View
@@ -210,17 +223,25 @@ export function FloatingTabBar({ state, descriptors, navigation }: BottomTabBarP
       <LinearGradient
         pointerEvents="none"
         colors={sheen}
-        locations={[0, 0.55, 1]}
+        locations={[0, 0.5, 1]}
         style={StyleSheet.absoluteFill}
       />
       <View
         pointerEvents="none"
         style={[styles.rim, { borderColor: rimColor }]}
       />
-      <View
+      <MaskedView
         pointerEvents="none"
-        style={[styles.innerEdge, { borderColor: innerEdgeColor }]}
-      />
+        style={StyleSheet.absoluteFill}
+        maskElement={<View style={styles.rimMask} />}>
+        <LinearGradient
+          colors={rimLight}
+          locations={[0, 0.35, 0.65, 1]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={StyleSheet.absoluteFill}
+        />
+      </MaskedView>
       {children}
     </View>
     </View>
@@ -241,7 +262,11 @@ export function FloatingTabBar({ state, descriptors, navigation }: BottomTabBarP
                 pointerEvents="none"
                 style={[
                   styles.lens,
-                  { width: tabWidth - LENS_INSET * 2, backgroundColor: selectionColor },
+                  {
+                    width: tabWidth - LENS_INSET * 2,
+                    backgroundColor: selectionColor,
+                    borderColor: lensRim,
+                  },
                   lensStyle,
                 ]}
               />
@@ -275,11 +300,11 @@ const styles = StyleSheet.create({
     ...Platform.select({
       ios: {
         shadowColor: '#000',
-        shadowOpacity: 0.10,
-        shadowRadius: 16,
-        shadowOffset: { width: 0, height: 6 },
+        shadowOpacity: 0.14,
+        shadowRadius: 20,
+        shadowOffset: { width: 0, height: 10 },
       },
-      android: { boxShadow: '0px 6px 18px rgba(0,0,0,0.14)' },
+      android: { boxShadow: '0px 10px 28px rgba(0,0,0,0.16), 0px 2px 6px rgba(0,0,0,0.06)' },
     }),
   },
   capsule: {
@@ -294,6 +319,7 @@ const styles = StyleSheet.create({
     top: (BAR_HEIGHT - SELECTION_HEIGHT) / 2,
     height: SELECTION_HEIGHT,
     borderRadius: SELECTION_HEIGHT / 2,
+    borderWidth: 1,
   },
   mainCapsule: {
     flex: 1,
@@ -306,14 +332,12 @@ const styles = StyleSheet.create({
     borderRadius: BAR_HEIGHT / 2,
     borderWidth: StyleSheet.hairlineWidth,
   },
-  innerEdge: {
-    position: 'absolute',
-    top: 1,
-    left: 1,
-    right: 1,
-    bottom: 1,
-    borderRadius: BAR_HEIGHT / 2 - 1,
-    borderWidth: StyleSheet.hairlineWidth,
+  /** Only the 1.2px band along the edge is visible through this mask. */
+  rimMask: {
+    ...StyleSheet.absoluteFillObject,
+    borderRadius: BAR_HEIGHT / 2,
+    borderWidth: 1.2,
+    borderColor: '#000',
   },
   mainTabs: {
     height: BAR_HEIGHT,
