@@ -129,7 +129,7 @@ function TickerCell({ stock, onSelect }: { stock: Stock; onSelect?: Props['onSel
  * identical, so when the first has travelled exactly its own width the frame is
  * pixel-for-pixel where it started and the loop is seamless.
  */
-export function TickerTape({ stocks, onSelect }: Props) {
+export const TickerTape = React.memo(function TickerTape({ stocks, onSelect }: Props) {
   const offset = useSharedValue(0);
   const [runWidth, setRunWidth] = useState(0);
   const reducedMotion = useReducedMotion();
@@ -209,7 +209,7 @@ export function TickerTape({ stocks, onSelect }: Props) {
 
     </View>
   );
-}
+});
 
 const styles = StyleSheet.create({
   board: {

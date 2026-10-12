@@ -148,10 +148,9 @@ import {
   youTubeWatchUrl,
   isYouTubeUrl,
   executeJupiterOrder,
-  getCachedPosts,
   getSandwichById,
   getUserProfile,
-  getPostPage,
+  getFeedPage,
   getSavedStock,
   searchJupiterToken,
   getTokenNews,
@@ -203,6 +202,11 @@ import {
 import { useSandwichDetail } from "@/lib/sandwich-detail-store";
 import { usePodcastGroup } from "@/lib/podcast-group-store";
 import { useSandwichComposer } from "@/lib/sandwich-composer-store";
+import {
+  EXPLORE_PAGE_SIZE,
+  fetchExploreFirstPage,
+  readExploreFirstPage,
+} from "@/lib/explore-feed";
 import { getAnonymousSocialId } from "@/lib/social-identity";
 import { useComposerProgress } from "@/lib/composer-progress-store";
 import { useToast } from "@/lib/toast-store";
@@ -432,7 +436,7 @@ const DISCLAIMER_TEXT =
  * `MIN_FEED_CARDS` / `MAX_*_PAGES` ceilings existed only because the old
  * endpoint paged over markets.
  */
-const FEED_PAGE_SIZE = 20;
+const FEED_PAGE_SIZE = EXPLORE_PAGE_SIZE;
 
 
 
@@ -6165,17 +6169,32 @@ export function SandwichScreen() {
     [appToast],
   );
 
+  const hasPostsRef = useRef(false);
+  useEffect(() => {
+    hasPostsRef.current = posts.length > 0;
+  }, [posts]);
+
+  // The viewer the feed on screen was loaded for.
+  const feedViewerRef = useRef<string | null | undefined>(undefined);
   useEffect(() => {
     let cancelled = false;
-    // The feed is viewer-specific because viewerHasLiked is part of every row.
-    // Clear it before resolving the next identity so account A's red hearts
-    // never flash for account B.
-    setAnonymousId(null);
-    setPosts([]);
-    setFeedCursor(null);
-    setHasMoreFeed(true);
-    setLoading(true);
-    void getAnonymousSocialId(appUser?.privyUserId).then((value) => {
+    const viewer = appUser?.privyUserId ?? null;
+    const previous = feedViewerRef.current;
+    feedViewerRef.current = viewer;
+    // The feed is viewer-specific because viewerHasLiked is part of every row,
+    // so a switch between two ACCOUNTS clears it before resolving the next
+    // identity — account A's red hearts must never flash for account B. The
+    // signed-out → signed-in step as Privy restores the session is not a
+    // switch: blanking there threw away a painted feed for a skeleton, and the
+    // refetch below corrects the hearts anyway.
+    if (previous !== undefined && previous !== null && previous !== viewer) {
+      setAnonymousId(null);
+      setPosts([]);
+      setFeedCursor(null);
+      setHasMoreFeed(true);
+      setLoading(true);
+    }
+    void getAnonymousSocialId(viewer).then((value) => {
       if (!cancelled) setAnonymousId(value);
     });
     return () => {
@@ -6249,7 +6268,12 @@ export function SandwichScreen() {
       // Pass the viewer's anonymous id so the server marks which cards this user
       // already liked (viewerHasLiked) — that's what renders the heart red on
       // load. Without it every post comes back unliked.
-      const result = await getPostPage(FEED_PAGE_SIZE, startCursor, null, anonymousId);
+      if (!anonymousId) throw new Error("Feed viewer is not resolved yet.");
+      // The first page goes through the shared loader, so a launch-time
+      // prefetch still in flight is joined rather than repeated.
+      const result = startCursor
+        ? await getFeedPage(FEED_PAGE_SIZE, startCursor, anonymousId)
+        : await fetchExploreFirstPage(anonymousId);
       // The cursor is stable, but a card republished between two pages could
       // still arrive twice — a duplicate key would break the list outright.
       const seen = new Set(existing.map((post) => post.id));
@@ -6267,7 +6291,11 @@ export function SandwichScreen() {
 
   const loadSandwiches = useCallback(
     async (refreshMode = false) => {
-      const cached = getCachedPosts(FEED_PAGE_SIZE, null, anonymousId);
+      // Memory first (warmed by Home's launch prefetch), else the copy saved
+      // on disk last session — however old, since it is replaced a moment
+      // later and a stale feed beats a skeleton.
+      const cached =
+        !refreshMode && anonymousId ? await readExploreFirstPage(anonymousId) : null;
 
       if (!refreshMode && cached) {
         // Paint the cached first page immediately, then refresh it in the
@@ -6287,7 +6315,9 @@ export function SandwichScreen() {
 
       if (refreshMode) {
         setRefreshing(true);
-      } else {
+      } else if (!hasPostsRef.current) {
+        // Cards already on screen (from before the viewer id resolved) stay
+        // up while the fresh page loads — never swapped for a skeleton.
         setLoading(true);
       }
 

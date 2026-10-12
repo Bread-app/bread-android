@@ -37,14 +37,18 @@ type CallRow = {
 type Props = {
   posts: SandwichPost[];
   loading: boolean;
-  /** Later feed pages are still arriving. */
-  loadingMore: boolean;
   failed: boolean;
   onSelect: (sandwich: Sandwich) => void;
   onRetry: () => void;
 };
 
-export function BestCallsSection({ posts, loading, loadingMore, failed, onSelect, onRetry }: Props) {
+export const BestCallsSection = React.memo(function BestCallsSection({
+  posts,
+  loading,
+  failed,
+  onSelect,
+  onRetry,
+}: Props) {
   const styles = useThemedStyles(makeStyles);
   const rows = useMemo(() => buildRows(posts), [posts]);
 
@@ -73,12 +77,9 @@ export function BestCallsSection({ posts, loading, loadingMore, failed, onSelect
         </View>
       )}
 
-      {loadingMore && rows.length > 0 ? (
-        <Text style={styles.loadingMore}>Loading more calls…</Text>
-      ) : null}
     </View>
   );
-}
+});
 
 /**
  * One call: what was called and how it has done, then where it came from
@@ -314,5 +315,4 @@ const makeStyles = (c: ThemeColors) =>
     logoFallbackText: { color: c.textSecondary, fontFamily: F, fontWeight: '900' },
     skeleton: { height: 60 * 3, borderRadius: Radius.lg, backgroundColor: c.surfaceAlt },
     emptyText: { color: c.textTertiary, fontFamily: F, fontSize: 14, fontWeight: '600', paddingVertical: 14 },
-    loadingMore: { color: c.textTertiary, fontFamily: F, fontSize: 13, fontWeight: '600', textAlign: 'center', paddingVertical: 14 },
   });

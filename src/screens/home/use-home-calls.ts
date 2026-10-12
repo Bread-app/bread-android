@@ -1,82 +1,81 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { getPostPage, type SandwichPost } from "@/lib/api";
+import { getPostPage, getTopCalls, type SandwichPost } from "@/lib/api";
+import { readFeedFromDisk, writeFeedToDisk } from "@/lib/feed-disk-cache";
 
-/** The server caps a page at 50 cards. */
-const PAGE_SIZE = 50;
 /**
- * Pages Home walks before it stops: enough for every call of the last few
- * weeks without turning one Home open into an unbounded crawl. Raise it, or
- * move the ranking server-side, once the feed outgrows it.
+ * A single feed page Home falls back to when the ranked endpoint is down (or
+ * the backend predates it): fewer calls than the full ranking, never none.
  */
-const MAX_PAGES = 8;
+const FALLBACK_PAGE_SIZE = 50;
+// Not viewer-scoped: the ranking carries no viewer's likes. `v2` because the
+// rows changed from whole cards to one card per call.
+const DISK_NAME = "home-top-calls-v2";
 
 export type HomeCalls = {
-  /** Every card fetched so far, in feed order; the section ranks them. */
+  /** One card per call, best first; the section re-ranks them anyway. */
   posts: SandwichPost[];
-  /** True until the first page has answered. */
+  /** True until the first answer — disk or network — is on screen. */
   loading: boolean;
-  /** True while later pages are still arriving. */
-  loadingMore: boolean;
   failed: boolean;
   refresh: () => Promise<void>;
 };
 
 /**
- * The whole feed — podcast moments, X calls, every asset — for Home's ranked
- * list. `/api/posts?rank=trending` hands back only its top six cards, so this
- * walks the plain feed instead: the first page paints, the rest stream in
- * behind it.
+ * Home's ranked list — every recent call by return, top first.
+ *
+ * The ranking is the server's (`/api/posts/top-calls`, served from the CDN). It
+ * used to be built here by walking the feed: 8 sequential pages of 50 cards,
+ * ~5MB, re-sorting the list under the reader's thumb as each page landed. A
+ * cold launch paints the last answer from disk, then one request replaces it.
  */
 export function useHomeCalls(): HomeCalls {
   const [posts, setPosts] = useState<SandwichPost[]>([]);
   const [loading, setLoading] = useState(true);
-  const [loadingMore, setLoadingMore] = useState(false);
   const [failed, setFailed] = useState(false);
-  // Bumped per load, so a refresh abandons the walk it replaces.
+  // Bumped per load, so a refresh discards the answer it replaces.
   const runRef = useRef(0);
+  // Any cards on screen — a failed refresh keeps them rather than an error.
+  const shownRef = useRef(false);
 
-  /**
-   * Walks the feed. Resolves once the FIRST page is in, so pull-to-refresh
-   * doesn't spin for the whole walk; later pages keep streaming in behind it.
-   */
-  const load = useCallback(() => new Promise<void>((resolveFirst) => {
+  const load = useCallback(async () => {
     const run = ++runRef.current;
     setFailed(false);
-    void (async () => {
-      let cursor: string | null = null;
-      const collected: SandwichPost[] = [];
-      try {
-        for (let page = 0; page < MAX_PAGES; page++) {
-          const result = await getPostPage(PAGE_SIZE, cursor);
-          if (run !== runRef.current) return;
-          collected.push(...result.posts);
-          setPosts([...collected]);
-          if (page === 0) {
-            setLoading(false);
-            setLoadingMore(Boolean(result.nextCursor));
-            resolveFirst();
-          }
-          cursor = result.nextCursor;
-          if (!cursor) break;
-        }
-      } catch {
-        if (run !== runRef.current) return;
-        // A failed later page keeps what already arrived.
-        if (collected.length === 0) setFailed(true);
-      } finally {
-        if (run === runRef.current) {
-          setLoading(false);
-          setLoadingMore(false);
-        }
-        resolveFirst();
+    try {
+      const { posts: next, rows } = await getTopCalls().catch(async () => {
+        const page = await getPostPage(FALLBACK_PAGE_SIZE);
+        return { posts: page.posts, rows: [] as unknown[] };
+      });
+      if (run !== runRef.current) return;
+      if (next.length > 0 || !shownRef.current) {
+        shownRef.current = next.length > 0;
+        setPosts(next);
       }
-    })();
-  }), []);
+      // Only the real ranking is worth a launch's head start.
+      writeFeedToDisk(DISK_NAME, rows);
+    } catch {
+      if (run !== runRef.current) return;
+      if (!shownRef.current) setFailed(true);
+    } finally {
+      if (run === runRef.current) setLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
+    let current = true;
+    // A head start only: the request starts at once alongside it, and a fresh
+    // answer that lands first is never replaced by the older disk copy.
+    void readFeedFromDisk(DISK_NAME).then((disk) => {
+      if (!current || !disk || shownRef.current) return;
+      shownRef.current = true;
+      setPosts(disk.posts);
+      setLoading(false);
+    });
     void load();
+    return () => {
+      current = false;
+    };
   }, [load]);
 
-  return { posts, loading, loadingMore, failed, refresh: load };
+  return { posts, loading, failed, refresh: load };
 }

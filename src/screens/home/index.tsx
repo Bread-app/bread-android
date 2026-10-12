@@ -1,8 +1,9 @@
+import { usePrivy } from "@privy-io/expo";
 import { useFocusEffect } from "@react-navigation/native";
 import { useRouter } from "expo-router";
 import * as Haptics from "expo-haptics";
 import { setStatusBarStyle } from "expo-status-bar";
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   RefreshControl,
   StyleSheet,
@@ -35,6 +36,7 @@ import { BottomTabInset, Fonts, type ThemeColors } from "@/constants/theme";
 import { useThemedStyles } from "@/hooks/use-themed-styles";
 import type { Sandwich } from "@/lib/api";
 import { withAlpha } from "@/lib/color-utils";
+import { prefetchExploreFeed } from "@/lib/explore-feed";
 import { useSandwichComposer } from "@/lib/sandwich-composer-store";
 import { useSandwichDetail } from "@/lib/sandwich-detail-store";
 import { useStockDetail } from "@/lib/stock-detail-store";
@@ -69,13 +71,24 @@ export function HomeScreen() {
   useComposeAction("home", openComposer);
   const { width } = useWindowDimensions();
 
+  // Explore is a native tab, mounted on its first visit, so it used to start
+  // loading only once tapped. Warm its first page just behind Home's own
+  // requests; the Explore screen reads the same cache.
+  const { user } = usePrivy();
+  const viewerId = user?.id ?? null;
+  useEffect(() => {
+    if (!viewerId) return;
+    const timer = setTimeout(() => void prefetchExploreFeed(viewerId), EXPLORE_PREFETCH_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [viewerId]);
+
   const portfolio = useHomePortfolio();
   const calls = useHomeCalls();
-  const sandwichDetail = useSandwichDetail();
+  const { open: openSandwichDetail } = useSandwichDetail();
   const openSandwich = useCallback((sandwich: Sandwich) => {
     void Haptics.selectionAsync();
-    sandwichDetail.open(sandwich);
-  }, [sandwichDetail]);
+    openSandwichDetail(sandwich);
+  }, [openSandwichDetail]);
   const movers = useHomeMovers();
   const refreshMovers = movers.refresh;
   const { open: openStock } = useStockDetail();
@@ -152,18 +165,33 @@ export function HomeScreen() {
     router.push("/deposit");
   }, [router]);
 
+  // Everything handed to the hero, the tape and the feed is kept stable, and
+  // each of them is memoized: the feed and the balance update on their own
+  // clocks, and one must not re-render (and re-roll) the other.
+  const refreshPortfolio = portfolio.refresh;
+  const refreshCalls = calls.refresh;
   const refreshAll = useCallback(async () => {
     setRefreshing(true);
     try {
       await Promise.allSettled([
-        portfolio.refresh(),
-        calls.refresh(),
+        refreshPortfolio(),
+        refreshCalls(),
         refreshMovers(),
       ]);
     } finally {
       setRefreshing(false);
     }
-  }, [calls, portfolio, refreshMovers]);
+  }, [refreshCalls, refreshPortfolio, refreshMovers]);
+  const retryAll = useCallback(() => void refreshAll(), [refreshAll]);
+  const retryCalls = useCallback(() => void refreshCalls(), [refreshCalls]);
+  const addCashAction = useMemo(() => <AddCashButton onPress={openDeposit} />, [openDeposit]);
+  const selectTapeStock = useCallback<NonNullable<React.ComponentProps<typeof TickerTape>["onSelect"]>>(
+    (stock, source, nativeSourceKey) => {
+      void Haptics.selectionAsync();
+      openStock(stock, { source, nativeSourceKey });
+    },
+    [openStock],
+  );
 
   return (
     <View style={styles.page}>
@@ -188,7 +216,7 @@ export function HomeScreen() {
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
-            onRefresh={() => void refreshAll()}
+            onRefresh={retryAll}
             // Pulling down reveals the dark header, never the page background.
             tintColor={HeaderPalette.muted}
           />
@@ -211,11 +239,11 @@ export function HomeScreen() {
               changeUsd={portfolio.displayedChangeUsd}
               positive={portfolio.positive}
               loadingValue={portfolio.cashLoading}
-              action={<AddCashButton onPress={openDeposit} />}
+              action={addCashAction}
               showError={
                 Boolean(portfolio.cashError) && !portfolio.cashLoading && !portfolio.ready
               }
-              onRetry={() => void refreshAll()}
+              onRetry={retryAll}
             />
           </View>
 
@@ -223,10 +251,7 @@ export function HomeScreen() {
               movers, each with its token logo. */}
           <TickerTape
             stocks={movers.tape}
-            onSelect={(stock, source, nativeSourceKey) => {
-              void Haptics.selectionAsync();
-              openStock(stock, { source, nativeSourceKey });
-            }}
+            onSelect={selectTapeStock}
           />
 
           {/* Last child, so the scanlines cover the safe-area band, the balance
@@ -242,10 +267,9 @@ export function HomeScreen() {
           <BestCallsSection
             posts={calls.posts}
             loading={calls.loading}
-            loadingMore={calls.loadingMore}
             failed={calls.failed}
             onSelect={openSandwich}
-            onRetry={() => void calls.refresh()}
+            onRetry={retryCalls}
           />
         </View>
       </Animated.ScrollView>
@@ -358,6 +382,9 @@ function ShoulderWedge({ d }: { d: string }) {
  */
 const EDGE_BLUR = 28;
 const EDGE_HEIGHT = 40;
+
+/** How long after Home mounts the Explore feed is warmed. */
+const EXPLORE_PREFETCH_DELAY_MS = 800;
 
 /** Board padding above the balance (below the status bar) and under it. */
 const BOARD_PAD_TOP = 4;

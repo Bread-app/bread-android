@@ -54,7 +54,7 @@ type Props = {
  * `HeaderPalette` and `BoardTone` rather than the theme tokens, because this
  * block never sits on the page background.
  */
-export function PortfolioHero({
+export const PortfolioHero = React.memo(function PortfolioHero({
   ready,
   valueLabel,
   changeUsd,
@@ -166,7 +166,7 @@ export function PortfolioHero({
       ) : null}
     </View>
   );
-}
+});
 
 const makeStyles = (_c: ThemeColors) =>
   StyleSheet.create({

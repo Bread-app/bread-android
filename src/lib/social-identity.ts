@@ -24,11 +24,28 @@ function createAnonymousId() {
  * the verified backend account; this value is also sent so older device likes
  * can be claimed without adding a second count.
  */
-export async function getAnonymousSocialId(privyUserId?: string | null): Promise<string> {
+const resolved = new Map<string, Promise<string>>();
+
+export function getAnonymousSocialId(privyUserId?: string | null): Promise<string> {
   const normalizedUserId = privyUserId?.trim();
+  // SecureStore keys allow only [A-Za-z0-9._-]. Privy ids are `did:privy:…`,
+  // and the old `encodeURIComponent` form (`did%3Aprivy%3A…`) was rejected, so
+  // every call for a signed-in user fell into the catch and minted a NEW id —
+  // nothing keyed on this value (feed caches, legacy-like claims) ever matched.
   const key = normalizedUserId
-    ? `${SOCIAL_ID_KEY}_${encodeURIComponent(normalizedUserId)}`
+    ? `${SOCIAL_ID_KEY}_${normalizedUserId.replace(/[^A-Za-z0-9._-]/g, '_')}`
     : SOCIAL_ID_KEY;
+  // One read per key per process: concurrent first calls would otherwise each
+  // see no saved value and mint different ids.
+  let pending = resolved.get(key);
+  if (!pending) {
+    pending = readOrCreate(key);
+    resolved.set(key, pending);
+  }
+  return pending;
+}
+
+async function readOrCreate(key: string): Promise<string> {
   try {
     const saved = await SecureStore.getItemAsync(key);
     if (saved && saved.trim().length >= 8) return saved;

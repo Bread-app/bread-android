@@ -1166,6 +1166,12 @@ type JsonRequestOptions = {
   timeoutMs?: number;
   timeoutMessage?: string;
   /**
+   * `false` sends no Authorization header. For CDN-cached public reads only:
+   * Vercel bypasses its cache for any request that carries one, so an
+   * authenticated call to a cacheable route always goes to the function.
+   */
+  auth?: boolean;
+  /**
    * Caller-owned cancellation, in addition to the timeout below. Used by
    * keystroke-driven requests (the dialpad's live quote) so a superseded call
    * stops occupying a connection instead of racing the one that replaced it.
@@ -1211,7 +1217,7 @@ async function requestJson<T>(path: string, options: JsonRequestOptions = {}): P
   // "Loading sandwiches took too long. Pull to refresh to try again."
   // The server had never been asked. `buildAuthHeaders` has its own ceiling and
   // resolves to {} rather than rejecting, so this cannot hang the request.
-  const authHeaders = await buildAuthHeaders();
+  const authHeaders = options.auth === false ? {} : await buildAuthHeaders();
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), options.timeoutMs ?? REQUEST_TIMEOUT_MS);
@@ -3261,6 +3267,12 @@ export type PostPage = {
   posts: SandwichPost[];
   /** Pass back as `cursor` for the next page; null when the feed is exhausted. */
   nextCursor: string | null;
+  /**
+   * The raw server row behind each of `posts`, index for index — what the
+   * on-disk feed caches store (see lib/feed-disk-cache), so a client-side shape
+   * change is absorbed by `normalizePost` on read instead of a stale copy.
+   */
+  rows: unknown[];
 };
 
 function normalizePost(value: unknown): SandwichPost | null {
@@ -3322,13 +3334,39 @@ export function getCachedPosts(
   limit = 20,
   user: AppUserPayload | null = null,
   anonymousId: string | null = null,
+  options?: {
+    /**
+     * Return the copy however old it is. For a paint-then-refresh caller, a
+     * stale feed beats a skeleton — the fresh page replaces it a moment later.
+     */
+    allowStale?: boolean;
+  },
 ): SandwichPost[] | null {
   // Same rule as the sandwich cache: responses carry viewerHasLiked, so a key
   // that isn't viewer-scoped could flash the previous account's hearts.
   if (!anonymousId) return null;
   const cached = postListCache.get(postCacheKey(limit, user, anonymousId));
-  if (cached && Date.now() - cached.cachedAt < SANDWICH_LIST_TTL_MS) return cached.data;
+  if (!cached) return null;
+  if (options?.allowStale || Date.now() - cached.cachedAt < SANDWICH_LIST_TTL_MS) {
+    return cached.data;
+  }
   return null;
+}
+
+/**
+ * Seed the first-page cache from somewhere other than the network (the on-disk
+ * copy). Never overwrites a copy the network already provided.
+ */
+export function seedCachedPosts(
+  limit: number,
+  user: AppUserPayload | null,
+  anonymousId: string,
+  posts: SandwichPost[],
+  cachedAt: number,
+): void {
+  const key = postCacheKey(limit, user, anonymousId);
+  if (postListCache.has(key) || posts.length === 0) return;
+  postListCache.set(key, { data: posts, cachedAt });
 }
 
 /**
@@ -3357,10 +3395,15 @@ export async function getPostPage(
     timeoutMessage: 'Loading sandwiches took too long. Pull to refresh to try again.',
   });
 
-  const rows = isRecord(payload) && Array.isArray(payload.posts) ? payload.posts : [];
-  const posts = rows
-    .map(normalizePost)
-    .filter((post): post is SandwichPost => post !== null);
+  const rawRows: unknown[] = isRecord(payload) && Array.isArray(payload.posts) ? payload.posts : [];
+  const posts: SandwichPost[] = [];
+  const rows: unknown[] = [];
+  for (const raw of rawRows) {
+    const post = normalizePost(raw);
+    if (!post) continue;
+    posts.push(post);
+    rows.push(raw);
+  }
   const nextCursor =
     isRecord(payload) && typeof payload.nextCursor === 'string' && payload.nextCursor
       ? payload.nextCursor
@@ -3373,7 +3416,130 @@ export async function getPostPage(
       cachedAt: Date.now(),
     });
   }
-  return { posts, nextCursor };
+  return { posts, nextCursor, rows };
+}
+
+// ── Public feed + the viewer's hearts ───────────────────────────────────────
+//
+// `/api/posts?public=1` is identical for every viewer, so the CDN serves it;
+// the viewer's hearts come separately from `/api/posts/likes` and are set on
+// the rows here, before normalizing (which copies them onto every market).
+
+/** Liked card ids per viewer, as of the last first-page read. */
+const likedPostIdsCache = new Map<string, Set<string>>();
+/**
+ * Hearts and counts from this session's own like taps. The public copy can be
+ * a few seconds behind, and must not show a just-liked card as unliked or the
+ * count the tap replaced.
+ */
+const recentCardSocial = new Map<string, { social: CardSocial; at: number }>();
+const RECENT_CARD_SOCIAL_TTL_MS = 2 * 60 * 1000;
+
+async function fetchLikedPostIds(anonymousId: string): Promise<Set<string>> {
+  const payload = await requestJson<unknown>('/api/posts/likes', {
+    params: { anonymousId },
+    timeoutMs: 15000,
+  });
+  const ids =
+    isRecord(payload) && Array.isArray(payload.postIds)
+      ? payload.postIds.filter((id): id is string => typeof id === 'string')
+      : null;
+  if (!ids) throw new ApiError('INVALID_RESPONSE', 'Likes response was invalid.');
+  const liked = new Set(ids);
+  likedPostIdsCache.set(anonymousId, liked);
+  return liked;
+}
+
+function withViewerSocial(raw: unknown, liked: Set<string>): unknown {
+  if (!isRecord(raw) || typeof raw.id !== 'string') return raw;
+  const recent = recentCardSocial.get(raw.id);
+  if (recent && Date.now() - recent.at < RECENT_CARD_SOCIAL_TTL_MS) {
+    return { ...raw, ...recent.social };
+  }
+  return { ...raw, viewerHasLiked: liked.has(raw.id) };
+}
+
+/**
+ * One page of the feed, served from the CDN, with the viewer's hearts applied.
+ * Same contract (and first-page cache) as `getPostPage`, which it falls back to
+ * when either half fails for a reason other than the network — e.g. a backend
+ * that predates the public routes.
+ */
+export async function getFeedPage(
+  limit: number,
+  cursor: string | null,
+  anonymousId: string,
+): Promise<PostPage> {
+  // The first page re-reads the hearts; later pages reuse that answer.
+  const knownLikes = cursor ? likedPostIdsCache.get(anonymousId) : undefined;
+  const [pageResult, likesResult] = await Promise.allSettled([
+    requestJson<unknown>('/api/posts', {
+      params: { limit: String(limit), public: '1', ...(cursor ? { cursor } : {}) },
+      auth: false,
+      timeoutMs: 20000,
+      timeoutMessage: 'Loading sandwiches took too long. Pull to refresh to try again.',
+    }),
+    knownLikes ? Promise.resolve(knownLikes) : fetchLikedPostIds(anonymousId),
+  ]);
+
+  if (pageResult.status === 'rejected') {
+    // A network failure would only fail again on the fallback.
+    const error: unknown = pageResult.reason;
+    if (error instanceof ApiError && (error.code === 'TIMEOUT' || error.code === 'NETWORK_ERROR')) {
+      throw error;
+    }
+    return getPostPage(limit, cursor, null, anonymousId);
+  }
+  if (likesResult.status === 'rejected') {
+    // Cards with every heart unset would let a tap "like" an already-liked card.
+    return getPostPage(limit, cursor, null, anonymousId);
+  }
+
+  const payload = pageResult.value;
+  const liked = likesResult.value;
+  const rawRows: unknown[] = isRecord(payload) && Array.isArray(payload.posts) ? payload.posts : [];
+  const posts: SandwichPost[] = [];
+  const rows: unknown[] = [];
+  for (const raw of rawRows) {
+    const row = withViewerSocial(raw, liked);
+    const post = normalizePost(row);
+    if (!post) continue;
+    posts.push(post);
+    rows.push(row);
+  }
+  const nextCursor =
+    isRecord(payload) && typeof payload.nextCursor === 'string' && payload.nextCursor
+      ? payload.nextCursor
+      : null;
+
+  if (!cursor) {
+    postListCache.set(postCacheKey(limit, null, anonymousId), { data: posts, cachedAt: Date.now() });
+  }
+  return { posts, nextCursor, rows };
+}
+
+/**
+ * Home's ranked list: the recent feed's calls by return, top first, one card per
+ * call. Ranked on the server and served from the CDN — see stock-backend
+ * `listTopCalls`. Viewer-free, so it is requested without auth.
+ */
+export async function getTopCalls(): Promise<{ posts: SandwichPost[]; rows: unknown[] }> {
+  const payload = await requestJson<unknown>('/api/posts/top-calls', {
+    auth: false,
+    // A cold ranking (CDN empty) reads 400 cards; every later one is a cache hit.
+    timeoutMs: 45000,
+    timeoutMessage: 'Loading calls took too long. Pull to refresh to try again.',
+  });
+  const rawRows: unknown[] = isRecord(payload) && Array.isArray(payload.posts) ? payload.posts : [];
+  const posts: SandwichPost[] = [];
+  const rows: unknown[] = [];
+  for (const raw of rawRows) {
+    const post = normalizePost(raw);
+    if (!post) continue;
+    posts.push(post);
+    rows.push(raw);
+  }
+  return { posts, rows };
 }
 
 /** Cards Home's Trending section shows, and the pool the server ranks them from. */
@@ -3566,6 +3732,15 @@ const CURATED_TTL_MS = 60 * 1000;
  */
 function updateCachedCardSocial(postId: string, social: CardSocial, anonymousId: string): void {
   const apply = (item: Sandwich) => (item.postId === postId ? { ...item, ...social } : item);
+
+  // The public feed's hearts: a later page, or the next refresh inside the
+  // CDN's few-second window, must agree with the tap.
+  recentCardSocial.set(postId, { social, at: Date.now() });
+  const liked = likedPostIdsCache.get(anonymousId);
+  if (liked) {
+    if (social.viewerHasLiked) liked.add(postId);
+    else liked.delete(postId);
+  }
 
   for (const [key, cached] of sandwichListCache) {
     if (!key.endsWith(`:${anonymousId}`)) continue;
