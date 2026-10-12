@@ -43,7 +43,7 @@ const F = Fonts.rounded;
  */
 
 const GREEN = '#35F046';
-const CHERRY_RED = '#EB1C40';
+const CHERRY_RED = '#FF1F4B';
 
 type Variant = {
   key: string;

@@ -216,8 +216,8 @@ const F = Fonts.rounded;
 
 // Realized P&L graph (own profile) — mirrors the other-user profile screen.
 const PORTFOLIO_RANGES: PortfolioRange[] = ["24H", "7d", "30d"];
-const PORTFOLIO_UP = "#02ED45";
-const PORTFOLIO_DOWN = "#EB1C40";
+const PORTFOLIO_UP = "#35F046";
+const PORTFOLIO_DOWN = "#FF1F4B";
 
 // Hide dust holdings: anything under this USD value rounds to "$0.00" and reads
 // as a placeholder row, so we drop it from the Holdings list entirely.
@@ -536,7 +536,7 @@ function TopToast({ toast }: { toast: ToastState }) {
 
   const color =
     toast.tone === "success"
-      ? "#137a3a"
+      ? "#35F046"
       : toast.tone === "error"
         ? colors.negative
         : colors.icon;
@@ -4872,13 +4872,13 @@ const makeStyles = (c: ThemeColors) => {
     alignItems: "flex-end",
   },
   cardPnlPercent: {
-    color: "#02ED45",
+    color: "#35F046",
     fontSize: 13,
     fontWeight: "900",
     fontFamily: F,
   },
   cardPnlAmount: {
-    color: "#02ED45",
+    color: "#35F046",
     fontSize: 11,
     fontWeight: "700",
     fontFamily: F,

@@ -37,6 +37,15 @@ import { useThemeStore } from '@/lib/theme-store';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
 import type { PhoenixCandle } from '@/lib/phoenix-api';
 import { PressableScale } from '@/components/pressable-scale';
+import {
+  CallerPin,
+  callerPinReach,
+  hitCallerPin,
+  type ChartPinAnchor,
+  nearestBarIndex,
+  stackLifts,
+  type ChartCaller,
+} from '@/components/chart-caller-pins';
 
 const F = Fonts.rounded;
 
@@ -240,6 +249,21 @@ type Props = {
    * chart. True from touch-down until this chart's gesture sequence finalizes.
    */
   interactionActive?: SharedValue<boolean>;
+  /**
+   * Creators who called this market, pinned at the candle where each call was
+   * made. They ride the same UI-thread frame as the candles, so a pan or pinch
+   * carries them along without React.
+   */
+  callers?: readonly ChartCaller[];
+  /** A tap on a caller's avatar. */
+  onPressCaller?: (caller: ChartCaller, at: ChartPinAnchor) => void;
+  /**
+   * `line` draws the mark closes as one stroke instead of candles — the same
+   * look as spot's line chart. Pan, zoom, crosshair and pins all still apply.
+   */
+  variant?: 'candle' | 'line';
+  /** Stroke colour for the `line` variant. Defaults to the rising colour. */
+  lineColor?: string;
 };
 
 /**
@@ -295,6 +319,10 @@ export const PhoenixMarkChart = React.memo(function PhoenixMarkChart({
   onClearTrigger,
   onCrosshairChange,
   interactionActive,
+  callers,
+  onPressCaller,
+  variant = 'candle',
+  lineColor,
 }: Props) {
   const styles = useThemedStyles(makeStyles);
   const { colors } = useThemeStore();
@@ -546,6 +574,16 @@ export const PhoenixMarkChart = React.memo(function PhoenixMarkChart({
         paintCandles(path, series, frame.value, chartHeight, bodyRatio, false);
       },
       [series, frame, chartHeight, bodyRatio],
+    ),
+  );
+
+  const linePath = usePathValue(
+    useCallback(
+      (path: SkPath) => {
+        'worklet';
+        paintLine(path, series, frame.value, chartHeight);
+      },
+      [series, frame, chartHeight],
     ),
   );
 
@@ -1184,6 +1222,63 @@ export const PhoenixMarkChart = React.memo(function PhoenixMarkChart({
     [frozenSV, onDragTrigger, pickLeg, shaped],
   );
 
+  const callerPins = useMemo(() => {
+    if (!callers || callers.length === 0 || candles.length === 0) return [];
+    // Highlighted last, so it draws over any pin sharing its candle.
+    const ordered = [...callers].sort((a, b) => Number(a.highlighted) - Number(b.highlighted));
+    const times = candles.map((candle) => candle.time);
+    const indices = ordered.map((caller) => nearestBarIndex(times, caller.occurredAt));
+    const lifts = stackLifts(ordered, indices);
+    return ordered.flatMap((caller, i) => {
+      const index = indices[i];
+      if (index < 0) return [];
+      return [{ caller, index, price: candles[index].markClose, lift: lifts[i] }];
+    });
+  }, [callers, candles]);
+
+  const plotRef = useRef<View>(null);
+  // A tap on an avatar previews the caller's post. Pins live on the UI-thread
+  // frame, so the hit test reads it where the pins are right now.
+  const tapPin = useCallback(
+    (x: number, y: number, absX: number, absY: number) => {
+      if (!onPressCaller) return;
+      const f = frame.value;
+      const pins = callerPins.flatMap(({ caller, index, price, lift }) => {
+        const px = (index - f.viewStart + 0.5) * f.slotWidth;
+        if (px < 0 || px > plotWidth) return [];
+        const py = yOf(price, f, chartHeight);
+        return [{ caller, x: px, y: py, lift, below: py < callerPinReach(caller, lift) }];
+      });
+      const hit = hitCallerPin(pins, x, y);
+      if (!hit) return;
+      // Measured, not taken from the touch: the preview sits over the chart.
+      const fallback = { top: absY - y, height: chartHeight };
+      const root = plotRef.current;
+      if (!root) return onPressCaller(hit, fallback);
+      root.measureInWindow((_wx, wy, _ww, wh) =>
+        onPressCaller(hit, Number.isFinite(wy) && wh > 0 ? { top: wy, height: Math.min(wh, chartHeight) } : fallback),
+      );
+    },
+    [callerPins, chartHeight, frame, onPressCaller, plotWidth],
+  );
+  const pinTap = useMemo(
+    () =>
+      Gesture.Tap()
+        .maxDuration(300)
+        .maxDistance(10)
+        .onEnd((event, success) => {
+          'worklet';
+          if (success) runOnJS(tapPin)(event.x, event.y, event.absoluteX, event.absoluteY);
+        }),
+    [tapPin],
+  );
+  const hasPinTap = Boolean(onPressCaller) && callerPins.length > 0;
+  const dragGesture = useMemo(() => (hasPinTap ? Gesture.Simultaneous(drag, pinTap) : drag), [drag, hasPinTap, pinTap]);
+  const plotGesture = useMemo(
+    () => (hasPinTap ? Gesture.Simultaneous(chartGesture, pinTap) : chartGesture),
+    [chartGesture, hasPinTap, pinTap],
+  );
+
   if (!shaped) {
     return (
       <View style={[styles.empty, { width, height: chartHeight }]}>
@@ -1218,7 +1313,7 @@ export const PhoenixMarkChart = React.memo(function PhoenixMarkChart({
   );
 
   const plot = (
-    <View style={{ width, height: totalHeight }}>
+    <View ref={plotRef} style={{ width, height: totalHeight }}>
       <Canvas style={{ width, height: chartHeight }}>
         {showGrid || priceAxis ? (
           <Path
@@ -1235,8 +1330,21 @@ export const PhoenixMarkChart = React.memo(function PhoenixMarkChart({
         {/* Two filled paths for the whole series, whatever the zoom: wicks are
             thin rects rather than strokes so a candle needs no second paint. */}
         <Group clip={plotClip}>
-          <Path path={risingPath} color={colors.chartPositive} />
-          <Path path={fallingPath} color={colors.chartNegative} />
+          {variant === 'line' ? (
+            <Path
+              path={linePath}
+              style="stroke"
+              strokeWidth={2.5}
+              strokeJoin="round"
+              strokeCap="round"
+              color={lineColor ?? colors.chartPositive}
+            />
+          ) : (
+            <>
+              <Path path={risingPath} color={colors.chartPositive} />
+              <Path path={fallingPath} color={colors.chartNegative} />
+            </>
+          )}
         </Group>
 
         {entryPrice !== null ? (
@@ -1270,6 +1378,19 @@ export const PhoenixMarkChart = React.memo(function PhoenixMarkChart({
           <Path path={stopLossPath} style="stroke" strokeWidth={1.5} color={colors.chartNegative} />
         ) : null}
       </Canvas>
+
+      {callerPins.map(({ caller, index, price, lift }) => (
+        <PerpCallerPin
+          key={caller.id}
+          caller={caller}
+          index={index}
+          price={price}
+          lift={lift}
+          frame={frame}
+          plotWidth={plotWidth}
+          chartHeight={chartHeight}
+        />
+      ))}
 
       {/* Crosshair. Mounted from React state — once per hold — but *moved* from
           the shared values the touch worklet writes, so dragging it never waits
@@ -1504,8 +1625,9 @@ export const PhoenixMarkChart = React.memo(function PhoenixMarkChart({
     </View>
   );
 
-  if (onDragTrigger) return <GestureDetector gesture={drag}>{plot}</GestureDetector>;
-  if (zoomable) return <GestureDetector gesture={chartGesture}>{plot}</GestureDetector>;
+  if (onDragTrigger) return <GestureDetector gesture={dragGesture}>{plot}</GestureDetector>;
+  if (zoomable) return <GestureDetector gesture={plotGesture}>{plot}</GestureDetector>;
+  if (hasPinTap) return <GestureDetector gesture={pinTap}>{plot}</GestureDetector>;
   return plot;
 });
 
@@ -1538,6 +1660,58 @@ function clampWindow(total: number, count: number, offset: number): Viewport {
   );
   return { count: safeCount, offset: clampOffset(total, safeCount, offset) };
 }
+
+/**
+ * One creator pin on the candles. Positioned from the shared frame on the UI
+ * thread, exactly like the candle bodies, and hidden while its candle is
+ * scrolled out of the plot.
+ */
+function PerpCallerPin({
+  caller,
+  index,
+  price,
+  lift,
+  frame,
+  plotWidth,
+  chartHeight,
+}: {
+  caller: ChartCaller;
+  index: number;
+  price: number;
+  lift: number;
+  frame: SharedValue<Frame>;
+  plotWidth: number;
+  chartHeight: number;
+}) {
+  const reach = callerPinReach(caller, lift);
+  const [below, setBelow] = useState(false);
+  const style = useAnimatedStyle(() => {
+    const f = frame.value;
+    const x = (index - f.viewStart + 0.5) * f.slotWidth;
+    const y = yOf(price, f, chartHeight);
+    return {
+      opacity: x < 0 || x > plotWidth ? 0 : 1,
+      transform: [{ translateX: x }, { translateY: y }],
+    };
+  });
+  // Flip under the candle when there is no headroom above it. Only the flip
+  // crosses to JS, and only when it changes.
+  useAnimatedReaction(
+    () => yOf(price, frame.value, chartHeight) < reach,
+    (next, previous) => {
+      if (next !== previous) runOnJS(setBelow)(next);
+    },
+  );
+  return (
+    <Reanimated.View pointerEvents="none" style={[pinStyles.pin, style]}>
+      <CallerPin caller={caller} lift={lift} below={below} />
+    </Reanimated.View>
+  );
+}
+
+const pinStyles = StyleSheet.create({
+  pin: { position: 'absolute', left: 0, top: 0 },
+});
 
 /**
  * The window as a *fractional* range over the series, not a slice: a drag of
@@ -1640,6 +1814,19 @@ function yOf(price: number, frame: Frame, chartHeight: number): number {
   return (
     PADDING_Y + ((frame.max - Math.min(frame.max, Math.max(frame.min, price))) / frame.span) * plotHeight
   );
+}
+
+/** The mark closes as one polyline, through each candle's centre. */
+function paintLine(path: SkPath, series: Series, frame: Frame, chartHeight: number): void {
+  'worklet';
+  for (let index = frame.first; index <= frame.last; index += 1) {
+    const close = series.closes[index];
+    if (close === undefined) continue;
+    const x = (index - frame.viewStart + 0.5) * frame.slotWidth;
+    const y = yOf(close, frame, chartHeight);
+    if (index === frame.first) path.moveTo(x, y);
+    else path.lineTo(x, y);
+  }
 }
 
 /**

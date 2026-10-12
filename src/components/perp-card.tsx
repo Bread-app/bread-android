@@ -14,8 +14,8 @@ import type { PerpsVenue } from '@/lib/perps-venue';
 
 const F = Fonts.rounded;
 
-const POSITIVE = "#02ED45";
-const NEGATIVE = "#EB1C40";
+const POSITIVE = "#35F046";
+const NEGATIVE = "#FF1F4B";
 
 export type PerpCardSummary = {
   /** False until the venue's trading account exists. */

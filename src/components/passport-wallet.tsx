@@ -28,7 +28,6 @@ import Animated, {
 } from "react-native-reanimated";
 
 import { Fonts } from "@/constants/theme";
-import { useShake } from "@/hooks/use-shake";
 
 const F = Fonts.rounded;
 const M = Fonts.mono;
@@ -66,8 +65,8 @@ const FIELD_BG = "#F3F4FB";
 const INK = "#0B1220";
 const INK_DIM = "#8A93A3";
 const LABEL = "#A6ABBE";
-const POSITIVE = "#02ED45";
-const NEGATIVE = "#EB1C40";
+const POSITIVE = "#35F046";
+const NEGATIVE = "#FF1F4B";
 const STITCH = "rgba(247,225,193,0.55)";
 const BRASS = "#D9A64A";
 const BRASS_DEEP = "#A9772B";
@@ -286,22 +285,6 @@ export function PassportWallet({
     snapTo(goingOpen);
   };
 
-  const onShake = () => {
-    if (openRef.current) {
-      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-      snapTo(false);
-      return;
-    }
-    // The card is flung out of the pocket and settles with an overshoot.
-    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-    progress.value = withSpring(1, OPEN_SPRING);
-    setTimeout(() => {
-      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    }, 480);
-  };
-
-  useShake(onShake, { threshold: 1.2, cooldownMs: 800 });
-
   // ── Gestures ──────────────────────────────────────────────────────────────
   const startProgress = useSharedValue(0);
   const pan = Gesture.Pan()
@@ -437,7 +420,7 @@ export function PassportWallet({
 
         {/* Pull hint sits over the wallet while closed. */}
         <Animated.View style={[styles.hint, hintStyle]} pointerEvents="none">
-          <Text style={styles.hintText}>shake · pull down · tap</Text>
+          <Text style={styles.hintText}>pull down · tap</Text>
         </Animated.View>
 
       </Animated.View>
@@ -793,8 +776,8 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
   },
   chipOn: {
-    borderColor: "rgba(2,237,69,0.5)",
-    backgroundColor: "rgba(2,237,69,0.07)",
+    borderColor: "rgba(53, 240, 70,0.5)",
+    backgroundColor: "rgba(53, 240, 70,0.07)",
   },
   chipOff: {
     borderColor: "#E0E3EC",

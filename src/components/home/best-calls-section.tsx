@@ -1,43 +1,62 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
+import Svg, { Path } from 'react-native-svg';
 
 import { AssetLogo } from '@/components/asset-logo';
+import { GlassSegmentedControl } from '@/components/glass-segmented-control';
 import { LoadErrorState } from '@/components/load-error-state';
-import { isXPostSource } from '@/components/x-post-preview';
 import { PressableScale } from '@/components/pressable-scale';
 import { Fonts, Radius, type ThemeColors } from '@/constants/theme';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
 import type { Sandwich, SandwichLeg, SandwichPost } from '@/lib/api';
-import { getSourceAuthorMeta, getSourceVideo } from '@/lib/sandwich-feed';
+import { callAttribution, legTicker } from '@/lib/call-attribution';
 import { symbolLogoSources } from '@/lib/stock-logos';
 import { useThemeStore } from '@/lib/theme-store';
 
 const F = Fonts.rounded;
 
 /**
- * Home's feed: every call — podcast moments, X posts, any asset — ranked by
- * return since it was posted, top PnL first. Ticker and return, who and when.
+ * Home's feed: every call — podcast moments, X posts, any asset. Top ranks by
+ * return since it was posted; Recent is newest first. Ticker and return, who
+ * and when.
  */
+
+const SORTS = ['Top', 'Recent'] as const;
+type CallSort = (typeof SORTS)[number];
 
 type CallRow = {
   sandwich: Sandwich;
   primary: SandwichLeg;
   extraLegs: SandwichLeg[];
   side: 'LONG' | 'SHORT';
+  /**
+   * The perp leverage the row quotes: the asset's perp market max when one
+   * exists, else a perp call's own opening leverage.
+   */
   leverage: number | null;
+  /** At `leverage` when the asset has a perp market, else the call's own return. */
   returnPct: number;
   /** Who the call came from: the X account or YouTube channel, else the Bread creator. */
   sourceName: string;
   sourceAvatarUrl: string | null;
   platform: 'x' | 'youtube' | null;
   postedAt: Date;
+  /** Other people who made the same call on the same asset. */
+  coCallers: CoCaller[];
 };
+
+type CoCaller = { name: string; avatarUrl: string | null };
+
+/** Faces the byline stack shows before folding the rest into "+N". */
+const CO_CALLER_FACES = 3;
 
 type Props = {
   posts: SandwichPost[];
   loading: boolean;
   failed: boolean;
+  /** The max leverage of the perp market behind a leg, or null when it has none. */
+  maxLeverageFor: (leg: SandwichLeg) => number | null;
   onSelect: (sandwich: Sandwich) => void;
   onRetry: () => void;
 };
@@ -46,15 +65,24 @@ export const BestCallsSection = React.memo(function BestCallsSection({
   posts,
   loading,
   failed,
+  maxLeverageFor,
   onSelect,
   onRetry,
 }: Props) {
   const styles = useThemedStyles(makeStyles);
-  const rows = useMemo(() => buildRows(posts), [posts]);
+  const [sort, setSort] = useState<CallSort>('Top');
+  const ranked = useMemo(() => buildRows(posts, maxLeverageFor), [posts, maxLeverageFor]);
+  const rows = useMemo(
+    () => (sort === 'Top' ? ranked : [...ranked].sort((a, b) => b.postedAt.getTime() - a.postedAt.getTime())),
+    [ranked, sort],
+  );
 
   return (
     <View style={styles.section}>
-      <Text style={styles.title}>Trending</Text>
+      <View style={styles.header}>
+        <Text style={styles.title}>Trending</Text>
+        <GlassSegmentedControl options={SORTS} value={sort} onChange={setSort} accessibilityLabel="Sort calls" />
+      </View>
 
       {loading && rows.length === 0 ? (
         <View style={styles.skeleton} />
@@ -66,11 +94,10 @@ export const BestCallsSection = React.memo(function BestCallsSection({
         </Text>
       ) : (
         <View>
-          {rows.map((row, index) => (
+          {rows.map((row) => (
             <CallRowView
               key={row.sandwich.id}
               row={row}
-              last={index === rows.length - 1}
               onPress={() => onSelect(row.sandwich)}
             />
           ))}
@@ -81,27 +108,38 @@ export const BestCallsSection = React.memo(function BestCallsSection({
   );
 });
 
+/** A solid up / down triangle in place of the +/− sign. */
+function TrendArrow({ up, color, size = 13 }: { up: boolean; color: string; size?: number }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 12 12" style={styles0.arrow}>
+      <Path d={up ? 'M6 1.6 L11 10.4 H1 Z' : 'M6 10.4 L11 1.6 H1 Z'} fill={color} strokeLinejoin="round" stroke={color} strokeWidth={1.2} />
+    </Svg>
+  );
+}
+
+const styles0 = StyleSheet.create({ arrow: { marginRight: 4 } });
+
 /**
  * One call: what was called and how it has done, then where it came from
  * (the X account or YouTube channel, with its logo) and when. Everything hangs off the logo column so the eye reads
  * straight down the tickers.
  */
-function CallRowView({ row, last, onPress }: { row: CallRow; last: boolean; onPress: () => void }) {
+function CallRowView({ row, onPress }: { row: CallRow; onPress: () => void }) {
   const styles = useThemedStyles(makeStyles);
   const { colors } = useThemeStore();
   const up = row.returnPct >= 0;
-  const accent = up ? colors.positive : colors.negative;
+  // The app's one neon green and one red, as is: no per-screen darkening.
+  const ink = (color: string) => color;
+  const accent = ink(up ? colors.positive : colors.negative);
   const symbol = legSymbol(row.primary);
   // "+N" reads as "and N more assets" beside the ticker, so it counts every
   // other leg — not just the ones the logo stack had no room for, and
   // prediction-market legs too, which have no logo here.
   const otherLegs = row.sandwich.legs.length - 1;
-  // Long is the default and goes unsaid; a short or a real perp's leverage is
-  // the one qualifier worth a word.
-  const qualifier = [
-    row.side === 'SHORT' ? 'Short' : null,
-    row.leverage && row.leverage > 1 ? formatLeverage(row.leverage) : null,
-  ].filter(Boolean).join(' ');
+  const short = row.side === 'SHORT';
+  const leverage = row.leverage && row.leverage > 1 ? formatLeverage(row.leverage) : null;
+  const qualifier = [short ? 'Short' : 'Long', leverage].filter(Boolean).join(' ');
+  const sideInk = ink(short ? colors.negative : colors.positive);
 
   return (
     <PressableScale
@@ -111,44 +149,90 @@ function CallRowView({ row, last, onPress }: { row: CallRow; last: boolean; onPr
       style={styles.row}
     >
       <LogoCluster legs={[row.primary, ...row.extraLegs]} />
-      <View style={[styles.body, !last && styles.bodyDivider]}>
+      <View style={styles.body}>
         <View style={styles.headline}>
           <Text style={styles.ticker} numberOfLines={1}>
             {symbol}
             {otherLegs > 0 ? <Text style={styles.tickerMore}>{`  +${otherLegs}`}</Text> : null}
-            {qualifier ? <Text style={[styles.tickerMore, { color: colors.negative }]}>{`  ${qualifier}`}</Text> : null}
           </Text>
-          <Text style={[styles.returnPct, { color: accent }]} numberOfLines={1}>
-            {`${up ? '+' : '−'}${Math.abs(row.returnPct).toFixed(1)}%`}
+          <Text style={[styles.side, { color: sideInk }]} numberOfLines={1}>
+            {short ? 'SHORT' : 'LONG'}
+            {leverage ? ` ${leverage}` : null}
+          </Text>
+          <Text style={styles.time} numberOfLines={1}>
+            {formatAgo(row.postedAt)}
           </Text>
         </View>
         <View style={styles.byline}>
           <AssetLogo
             uri={row.sourceAvatarUrl}
-            size={16}
+            size={18}
             backgroundColor={colors.surfaceAlt}
-            fallback={<LogoFallback letter={row.sourceName.replace(/^@/, '')} size={16} />}
+            fallback={<LogoFallback letter={row.sourceName.replace(/^@/, '')} size={18} />}
           />
           <Text style={styles.footnote} numberOfLines={1}>
-            {`${row.sourceName} · ${formatAgo(row.postedAt)}`}
+            {row.sourceName}
           </Text>
           {row.platform === 'youtube' ? (
-            <Ionicons name="logo-youtube" size={13} color="#FF0000" />
+            <Ionicons name="logo-youtube" size={15} color="#FF0000" />
           ) : row.platform === 'x' ? (
-            <Ionicons name="logo-x" size={11} color={colors.text} />
+            <Ionicons name="logo-x" size={13} color={colors.text} />
           ) : null}
+          {row.coCallers.length > 0 ? <CoCallerStack callers={row.coCallers} /> : null}
+          <View style={styles.returnWrap}>
+            <TrendArrow up={up} color={accent} />
+            <Text style={[styles.returnPct, { color: accent }]} numberOfLines={1}>
+              {`${Math.abs(row.returnPct).toFixed(1)}%`}
+            </Text>
+          </View>
         </View>
       </View>
     </PressableScale>
   );
 }
 
-const LOGO_SLOT = 38;
+const FACE = 20;
+const FACE_RING = 1.5;
+
+/**
+ * Everyone else who made the same call: a few overlapping
+ * faces in a pill, the rest counted as "+N".
+ */
+function CoCallerStack({ callers }: { callers: CoCaller[] }) {
+  const styles = useThemedStyles(makeStyles);
+  const { colors } = useThemeStore();
+  const shown = callers.slice(0, CO_CALLER_FACES);
+  const more = callers.length - shown.length;
+  return (
+    <View
+      style={styles.coCallers}
+      accessible
+      accessibilityLabel={`Also called by ${callers.map((c) => c.name).join(', ')}`}
+    >
+      {shown.map((caller, index) => (
+        <View
+          key={caller.name}
+          style={[styles.coCallerFace, { marginLeft: index === 0 ? 0 : -6, zIndex: shown.length - index }]}
+        >
+          <AssetLogo
+            uri={caller.avatarUrl}
+            size={FACE}
+            backgroundColor={colors.surfaceAlt}
+            fallback={<LogoFallback letter={caller.name.replace(/^@/, '')} size={FACE} />}
+          />
+        </View>
+      ))}
+      {more > 0 ? <Text style={styles.coCallerMore}>{`+${more}`}</Text> : null}
+    </View>
+  );
+}
+
+const LOGO_SLOT = 44;
 /**
  * Every row reserves this width for its logos, so a single 38pt logo and a
  * two-logo stack both leave the ticker at the same x.
  */
-const LOGO_COLUMN = 46;
+const LOGO_COLUMN = 53;
 // Two is all the column can hold legibly; three crushed the back ones to slivers.
 const CLUSTER_MAX = 2;
 /**
@@ -156,12 +240,10 @@ const CLUSTER_MAX = 2;
  * the whole stack fits the shared logo column so every ticker lines up.
  * Logo size per count; the overlap is whatever squeezes the row into the slot.
  */
-const CLUSTER_LOGO: Record<number, number> = { 2: 26 };
+const CLUSTER_LOGO: Record<number, number> = { 2: 30 };
 const CLUSTER_RING = 2;
 
-function legSymbol(leg: SandwichLeg): string {
-  return leg.underlyingSymbol ?? leg.symbol ?? leg.label;
-}
+const legSymbol = legTicker;
 
 /**
  * One logo for a single-asset call; for a basket, the first two in a row —
@@ -226,7 +308,7 @@ function LogoFallback({ letter, size }: { letter: string; size: number }) {
 
 /* ---------------------------------------------------------------- data --- */
 
-function buildRows(posts: SandwichPost[]): CallRow[] {
+function buildRows(posts: SandwichPost[], maxLeverageFor: Props['maxLeverageFor']): CallRow[] {
   const seen = new Set<string>();
   const rows: CallRow[] = [];
   for (const post of posts) {
@@ -242,34 +324,69 @@ function buildRows(posts: SandwichPost[]): CallRow[] {
       const postedAt = new Date(sandwich.createdAt);
       if (Number.isNaN(postedAt.getTime())) continue;
       const short = sandwich.direction === 'down' || /^(short|sell)$/i.test(primary.side);
-      const handle = sandwich.builder?.username?.trim().replace(/^@+/, '');
-      const creator = handle ? `@${handle}` : sandwich.builder?.name?.trim() || 'Bread';
-      const video = getSourceVideo(sandwich);
-      const author = getSourceAuthorMeta(sandwich);
-      const platform = video ? 'youtube' : isXPostSource(sandwich.source) ? 'x' : null;
-      const sourceName =
-        (video?.channelName ?? null) ||
-        (author ? (author.isHandle ? `@${author.name}` : author.name) : null) ||
-        creator;
-      const sourceAvatarUrl =
-        video?.channelAvatarUrl ?? author?.avatarUrl ?? sandwich.builder?.avatarUrl ?? null;
+      const { name: sourceName, avatarUrl: sourceAvatarUrl, platform } = callAttribution(sandwich);
+      // A single-asset call with a perp market behind it is quoted at that
+      // market's max leverage. `pnlPct` is the signed, unlevered move, so the
+      // levered return is a straight multiple, floored at liquidation. A
+      // basket's return can't be levered by one leg's market, so it stays as is.
+      const maxLeverage = legs.length === 1 ? maxLeverageFor(primary) : null;
+      const leverage = maxLeverage && maxLeverage > 1
+        ? maxLeverage
+        : sandwich.venue === 'perp' ? primary.leverage ?? null : null;
       rows.push({
         sandwich,
         primary,
         extraLegs: legs.slice(1),
         side: short ? 'SHORT' : 'LONG',
-        // Only a real perp call carries leverage — never a hypothetical
-        // "max lev" multiplier on a spot buy.
-        leverage: sandwich.venue === 'perp' ? primary.leverage ?? null : null,
-        returnPct: sandwich.pnlPct,
+        leverage,
+        returnPct: maxLeverage && maxLeverage > 1
+          ? Math.max(-100, sandwich.pnlPct * maxLeverage)
+          : sandwich.pnlPct,
         sourceName,
         sourceAvatarUrl,
         platform,
         postedAt,
+        coCallers: [],
       });
     }
   }
-  return rows.sort((a, b) => b.returnPct - a.returnPct);
+  return mergeByAsset(rows).sort((a, b) => b.returnPct - a.returnPct);
+}
+
+/** The asset a call leads with, as a key: its mint when it has one, else its ticker. */
+function assetKey(leg: SandwichLeg): string {
+  return leg.mint ? `mint:${leg.mint}` : `sym:${legTicker(leg).trim().toUpperCase()}`;
+}
+
+/**
+ * One row per asset and side. The best-performing call leads; everyone else
+ * who made the same call — whenever they posted it — goes in the pill, best
+ * call first, one face per person. Repeat calls from the lead's own source
+ * just fold away.
+ */
+function mergeByAsset(rows: CallRow[]): CallRow[] {
+  const groups = new Map<string, CallRow[]>();
+  for (const row of rows) {
+    const key = `${assetKey(row.primary)}|${row.side}`;
+    const group = groups.get(key);
+    if (group) group.push(row);
+    else groups.set(key, [row]);
+  }
+  const merged: CallRow[] = [];
+  for (const group of groups.values()) {
+    group.sort((a, b) => b.returnPct - a.returnPct);
+    const [lead, ...others] = group;
+    const seen = new Set([lead.sourceName.toLowerCase()]);
+    const coCallers: CoCaller[] = [];
+    for (const other of others) {
+      const id = other.sourceName.toLowerCase();
+      if (seen.has(id)) continue;
+      seen.add(id);
+      coCallers.push({ name: other.sourceName, avatarUrl: other.sourceAvatarUrl });
+    }
+    merged.push({ ...lead, coCallers });
+  }
+  return merged;
 }
 
 /* ---------------------------------------------------------- formatting --- */
@@ -291,6 +408,7 @@ function formatAgo(date: Date): string {
 const makeStyles = (c: ThemeColors) =>
   StyleSheet.create({
     section: {},
+    header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 },
     title: {
       color: c.text,
       fontSize: 22,
@@ -298,21 +416,26 @@ const makeStyles = (c: ThemeColors) =>
       fontWeight: '800',
       fontFamily: F,
       letterSpacing: -0.3,
-      marginBottom: 4,
     },
-    row: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, paddingTop: 16 },
+    row: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, paddingTop: 18 },
     logoRow: { flexDirection: 'row', alignItems: 'center', width: LOGO_COLUMN, height: LOGO_SLOT },
     clusterItem: { borderColor: c.background, overflow: 'hidden' },
-    body: { flex: 1, minWidth: 0, paddingBottom: 16, gap: 4 },
-    bodyDivider: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border },
-    headline: { flexDirection: 'row', alignItems: 'center', minHeight: 22 },
-    ticker: { flex: 1, color: c.text, fontFamily: F, fontSize: 16, lineHeight: 20, fontWeight: '800' },
-    tickerMore: { color: c.textTertiary, fontSize: 13, fontWeight: '700' },
-    returnPct: { minWidth: 58, textAlign: 'right', fontFamily: F, fontSize: 16, fontWeight: '800', fontVariant: ['tabular-nums'] },
-    byline: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 1 },
-    footnote: { flexShrink: 1, color: c.textTertiary, fontFamily: F, fontSize: 12, lineHeight: 16, fontWeight: '600', fontVariant: ['tabular-nums'] },
+    body: { flex: 1, minWidth: 0, paddingBottom: 18, gap: 5 },
+    headline: { flexDirection: 'row', alignItems: 'center', minHeight: 25 },
+    ticker: { flexShrink: 1, color: c.text, fontFamily: F, fontSize: 18, lineHeight: 23, fontWeight: '800' },
+    tickerMore: { color: c.textTertiary, fontSize: 15, fontWeight: '700' },
+    side: { marginLeft: 8, fontFamily: Fonts.displayOne, fontSize: 15, lineHeight: 20, letterSpacing: 0.3 },
+    // Nudged up to sit on the ticker's cap height, and faded under the figures.
+    time: { marginLeft: 'auto', paddingLeft: 8, alignSelf: 'flex-start', marginTop: 0, opacity: 0.55, color: c.textTertiary, fontFamily: F, fontSize: 12, lineHeight: 16, fontWeight: '500', fontVariant: ['tabular-nums'] },
+    returnWrap: { marginLeft: 'auto', paddingLeft: 8, flexDirection: 'row', alignItems: 'center' },
+    returnPct: { textAlign: 'right', fontFamily: Fonts.displayMedium, fontSize: 17, lineHeight: 23, letterSpacing: 0.3, fontVariant: ['tabular-nums'] },
+    coCallers: { flexDirection: 'row', alignItems: 'center', marginLeft: 3 },
+    coCallerFace: { borderRadius: FACE / 2 + FACE_RING, borderWidth: FACE_RING, borderColor: c.background, overflow: 'hidden' },
+    coCallerMore: { marginLeft: 4, color: c.textSecondary, fontFamily: F, fontSize: 12, fontWeight: '800', fontVariant: ['tabular-nums'] },
+    byline: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 1 },
+    footnote: { flexShrink: 1, color: c.textTertiary, fontFamily: F, fontSize: 14, lineHeight: 18, fontWeight: '600', fontVariant: ['tabular-nums'] },
     logoFallback: { alignItems: 'center', justifyContent: 'center', backgroundColor: c.surfaceAlt },
     logoFallbackText: { color: c.textSecondary, fontFamily: F, fontWeight: '900' },
-    skeleton: { height: 60 * 3, borderRadius: Radius.lg, backgroundColor: c.surfaceAlt },
+    skeleton: { height: 70 * 3, borderRadius: Radius.lg, backgroundColor: c.surfaceAlt },
     emptyText: { color: c.textTertiary, fontFamily: F, fontSize: 14, fontWeight: '600', paddingVertical: 14 },
   });

@@ -63,8 +63,8 @@ const HAS_GLASS = Platform.OS === 'ios' && isGlassEffectAPIAvailable();
 // The position card: a raised inner surface on a one-step-darker outer, in
 // the theme's own tones. (Sharing renders its own card in AssetShareSheet, so
 // nothing here has to stay light for a capture.)
-const CARD_POS = '#02ED45';
-const CARD_NEG = '#EB1C40';
+const CARD_POS = '#35F046';
+const CARD_NEG = '#FF1F4B';
 
 
 // The pinned actions, on the app's shared CTA geometry: margin and radius come

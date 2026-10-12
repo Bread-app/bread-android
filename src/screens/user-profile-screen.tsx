@@ -51,7 +51,6 @@ import {
   type PortfolioRange,
   type Sandwich,
   type SocialUser,
-  type Stock,
   getBlockedUsers,
 } from '@/lib/api';
 import { SkeletonRows } from '@/components/skeleton-rows';
@@ -112,8 +111,8 @@ import {
 
 const F = Fonts.rounded;
 
-const COLOR_UP = '#02ED45';
-const COLOR_DOWN = '#EB1C40';
+const COLOR_UP = '#35F046';
+const COLOR_DOWN = '#FF1F4B';
 const RANGES: PortfolioRange[] = ['24H', '7d', '30d'];
 
 type Tab = 'holdings' | 'sandwiches';

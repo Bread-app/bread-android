@@ -13,7 +13,17 @@ import Animated, {
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { CtaGlassFill, ctaGlassTint } from '@/components/side-glass-button';
+import {
+  NATIVE_ZOOM_SOURCE_TEST_ID,
+  NATIVE_ZOOM_SPIKE,
+  setNativeZoomSource,
+  useIsNativeZoomSource,
+} from '@/lib/native-zoom';
 import { useThemeStore } from '@/lib/theme-store';
+
+/** The native zoom marker the composer grows out of when "+" opens it. */
+const COMPOSE_ZOOM_KEY = 'compose-fab';
 
 const HAS_GLASS = Platform.OS === 'ios' && isGlassEffectAPIAvailable();
 const SIZE = 64;
@@ -81,8 +91,8 @@ export function TabsComposeFab() {
       pointerEvents={shown ? 'box-none' : 'none'}
       style={[
         styles.anchor,
-        // Just above the tab bar, where both screens used to put it.
-        { bottom: 88 + Math.max(insets.bottom, 10), right: 16 + Math.max(insets.right, 0) },
+        // Low over the tab bar's right end, clear of the search button.
+        { bottom: 74 + Math.max(insets.bottom, 10), right: 16 + Math.max(insets.right, 0) },
         presenceStyle,
       ]}
     >
@@ -92,7 +102,17 @@ export function TabsComposeFab() {
           if (!action) return;
           Keyboard.dismiss();
           void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-          action();
+          if (!NATIVE_ZOOM_SPIKE) {
+            action();
+            return;
+          }
+          // Mark the "+" as the zoom source, push once the marker has reached
+          // the native view, then clear it so the next push isn't from here.
+          setNativeZoomSource(COMPOSE_ZOOM_KEY);
+          requestAnimationFrame(() => {
+            action();
+            requestAnimationFrame(() => setNativeZoomSource(null));
+          });
         }}
       />
     </Animated.View>
@@ -102,12 +122,15 @@ export function TabsComposeFab() {
 /**
  * The floating "New sandwich" button's face. Placed by `TabsComposeFab`.
  *
- * On iOS 26 it is native Liquid Glass, tinted the app's action blue and
- * interactive (the system press-bloom). Elsewhere it falls back to the solid
- * blue circle with its soft glow.
+ * On iOS 26 it is the app's CTA Liquid Glass — a clear, interactive material
+ * tinted action blue with the same top-lit wash and bottom glow as BUY — so
+ * the feed shows through it. Elsewhere it falls back to the solid blue circle.
+ * It is also the native zoom source the composer grows out of.
  */
 function ComposeFab({ onPress }: { onPress: () => void }) {
   const { colors, scheme } = useThemeStore();
+  const isDark = scheme === 'dark';
+  const isZoomSource = useIsNativeZoomSource(COMPOSE_ZOOM_KEY);
 
   return (
     <Pressable
@@ -115,17 +138,19 @@ function ComposeFab({ onPress }: { onPress: () => void }) {
       accessibilityLabel="New sandwich"
       hitSlop={12}
       onPress={onPress}
+      testID={isZoomSource ? NATIVE_ZOOM_SOURCE_TEST_ID : undefined}
       style={[styles.fab, !HAS_GLASS && { shadowColor: colors.actionPrimary }, !HAS_GLASS && styles.glow]}
     >
       {HAS_GLASS ? (
         <GlassView
-          glassEffectStyle="regular"
+          glassEffectStyle="clear"
           isInteractive
-          tintColor={colors.actionPrimary}
+          tintColor={ctaGlassTint(colors.actionPrimary, isDark)}
           // The in-app Light/Dark toggle is independent of the OS appearance.
-          colorScheme={scheme === 'dark' ? 'dark' : 'light'}
+          colorScheme={isDark ? 'dark' : 'light'}
           style={styles.face}
         >
+          <CtaGlassFill color={colors.actionPrimary} isDark={isDark} />
           <Ionicons name="add" size={34} color="#FFFFFF" />
         </GlassView>
       ) : (

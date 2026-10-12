@@ -27,6 +27,15 @@ import {
   type BirdeyeOhlcvTimeframe,
 } from "@/lib/api";
 import { WavingLineSkeleton } from "./waving-line-skeleton";
+import {
+  CallerPin,
+  hitCallerPin,
+  type ChartPinAnchor,
+  callerPinReach,
+  nearestBarIndex,
+  stackLifts,
+  type ChartCaller,
+} from "./chart-caller-pins";
 
 const F = Fonts.rounded;
 
@@ -68,6 +77,14 @@ type LineChartProps = {
    * surface (the stock sheet is `#f7fcf8`, not white) must pass it.
    */
   surfaceColor?: string;
+  /**
+   * Creators who called this asset, pinned to the line at the bar where each
+   * call was made. Calls older than the window simply sit out until a longer
+   * window brings them in.
+   */
+  callers?: readonly ChartCaller[];
+  /** A tap on a caller's avatar. */
+  onPressCaller?: (caller: ChartCaller, at: ChartPinAnchor) => void;
 };
 
 /* ─── Constants ─── */
@@ -325,6 +342,8 @@ function LineChartImpl({
   color,
   showDotGrid = false,
   surfaceColor,
+  callers,
+  onPressCaller,
 }: LineChartProps) {
   const { colors } = useThemeStore();
   const styles = useThemedStyles(makeStyles);
@@ -333,6 +352,7 @@ function LineChartImpl({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const requestIdRef = useRef(0);
+  const chartWrapRef = useRef<View>(null);
   const animateNextUpdateRef = useRef(true);
 
   const [chartWidth, setChartWidth] = useState(320);
@@ -484,6 +504,21 @@ function LineChartImpl({
 
   const linePath = useMemo(() => buildLinePath(points), [points]);
 
+  // Highlighted pin last, so it draws over any it shares a bar with.
+  const callerPins = useMemo(() => {
+    if (!callers || callers.length === 0 || points.length === 0) return [];
+    const ordered = [...callers].sort((a, b) => Number(a.highlighted) - Number(b.highlighted));
+    const times = scaledCandles.map((c) => c.timestamp);
+    const indices = ordered.map((caller) => nearestBarIndex(times, caller.occurredAt));
+    const lifts = stackLifts(ordered, indices);
+    return ordered.flatMap((caller, i) => {
+      const point = points[indices[i]];
+      if (!point) return [];
+      const below = point.y < callerPinReach(caller, lifts[i]);
+      return [{ caller, point, lift: lifts[i], below }];
+    });
+  }, [callers, points, scaledCandles]);
+
   const lastPoint = points.length > 0 ? points[points.length - 1] : null;
 
   const safeSelectedIndex = Math.max(
@@ -551,6 +586,26 @@ function LineChartImpl({
   /* Gesture handler — X and the exact curve Y stay inside one UI-thread
    * worklet. Only a deduped candle-index change hops to JS for header text and
    * haptics. */
+  const tapPin = useCallback(
+    (x: number, y: number, absX: number, absY: number) => {
+      if (!onPressCaller) return;
+      const hit = hitCallerPin(
+        callerPins.map(({ caller, point, lift, below }) => ({ caller, x: point.x, y: point.y, lift, below })),
+        x,
+        y,
+      );
+      if (!hit) return;
+      // Measured, not taken from the touch: the preview sits over the chart.
+      const fallback = { top: absY - y, height };
+      const wrap = chartWrapRef.current;
+      if (!wrap) return onPressCaller(hit, fallback);
+      wrap.measureInWindow((_wx, wy, _ww, wh) =>
+        onPressCaller(hit, Number.isFinite(wy) && wh > 0 ? { top: wy, height: wh } : fallback),
+      );
+    },
+    [callerPins, height, onPressCaller],
+  );
+
   const scrubGesture = useMemo(
     () => {
       const updateScrub = (rawX: number) => {
@@ -573,7 +628,16 @@ function LineChartImpl({
         }
       };
 
-      return Gesture.Pan()
+      // A tap on a caller's avatar previews their post; the scrub runs
+      // alongside it, so a tap that misses every pin is just a scrub.
+      const tap = Gesture.Tap()
+        .maxDuration(300)
+        .maxDistance(10)
+        .onEnd((event, success) => {
+          if (success) runOnJS(tapPin)(event.x, event.y, event.absoluteX, event.absoluteY);
+        });
+
+      const pan = Gesture.Pan()
         .minDistance(0)
         .maxPointers(1)
         .onTouchesDown((event) => {
@@ -588,8 +652,10 @@ function LineChartImpl({
           committedIndex.value = -1;
           runOnJS(endScrub)();
         });
+      return Gesture.Simultaneous(pan, tap);
     },
     [
+      tapPin,
       chartWidth,
       commitScrubIndex,
       committedIndex,
@@ -683,6 +749,7 @@ function LineChartImpl({
             <View style={[styles.chartArea, { minHeight: height }, loading && styles.chartAreaLoading]}>
               <GestureDetector gesture={scrubGesture}>
                 <View
+                  ref={chartWrapRef}
                   style={styles.chartWrap}
                   onLayout={(e) => setChartWidth(e.nativeEvent.layout.width)}
                 >
@@ -774,6 +841,16 @@ function LineChartImpl({
                     ) : null}
 
                   </Svg>
+
+                  {callerPins.map(({ caller, point, lift, below }) => (
+                    <View
+                      key={caller.id}
+                      pointerEvents="none"
+                      style={[styles.callerPin, { transform: [{ translateX: point.x }, { translateY: point.y }] }]}
+                    >
+                      <CallerPin caller={caller} lift={lift} below={below} />
+                    </View>
+                  ))}
 
                   {/* Wash over the not-yet-scrubbed side. Below the crosshair
                       in paint order so the guide line and its dot stay crisp. */}
@@ -869,6 +946,11 @@ const makeStyles = (c: ThemeColors) => StyleSheet.create({
     top: 0,
     width: 1.5,
     backgroundColor: "rgba(148,163,184,0.55)",
+  },
+  callerPin: {
+    position: "absolute",
+    left: 0,
+    top: 0,
   },
   scrubVeil: {
     position: "absolute",

@@ -55,7 +55,7 @@ type Step = 'amount' | 'address' | 'confirm' | 'success';
 
 // Withdraw's crimson is reserved for the money-moving CTA (Send). The
 // navigation CTAs (Continue, Done) use the app's primary blue.
-const WITHDRAW_RED = '#D2042D';
+const WITHDRAW_RED = '#FF1F4B';
 
 const USDC_DECIMALS = 6;
 const BRAND_GREEN = '#35F046';

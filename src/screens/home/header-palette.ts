@@ -44,8 +44,8 @@ export const HeaderPalette = {
  * Was '#50FF05' / '#E63B8A', tuned to glow on a near-black board.
  */
 export const BoardTone = {
-  up: '#02ED45',
-  down: '#EB1C40',
+  up: '#35F046',
+  down: '#FF1F4B',
   flat: '#7F8C88',
 } as const;
 

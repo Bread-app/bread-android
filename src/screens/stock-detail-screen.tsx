@@ -1,6 +1,6 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
-import { GlassView, isGlassEffectAPIAvailable } from 'expo-glass-effect';
+import { isGlassEffectAPIAvailable } from 'expo-glass-effect';
 import { LinearGradient } from 'expo-linear-gradient';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Platform, Pressable, StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
@@ -40,7 +40,6 @@ import { StockTradeActions } from '@/components/stock-trade-actions';
 import { ZoomScreen, type ZoomScreenRef } from '@/components/zoom-screen';
 import type { ThemeColors } from '@/constants/theme';
 import { useThemedStyles } from '@/hooks/use-themed-styles';
-import { withAlpha } from '@/lib/color-utils';
 import { ctaBottomInset } from '@/lib/screen-corners';
 import { appUserPayloadFromPrivyUser, type Stock } from '@/lib/api';
 import type { StockDetailOpenOptions } from '@/lib/stock-detail-store';
@@ -263,6 +262,7 @@ export function StockDetailScreen({ zoom = true, assetOverride, optionsOverride,
         embeddedPerpMarket={options.perpMarket ?? null}
         embeddedVenue={requestedVenue}
         embeddedPerpSide={options.side}
+        embeddedCalls={options.calls ?? null}
         hideEmbeddedActions
         onEmbeddedVenueChange={setVenueMode}
         onEmbeddedCanToggleMarketChange={setCanToggleMarket}
@@ -282,25 +282,15 @@ export function StockDetailScreen({ zoom = true, assetOverride, optionsOverride,
     </View>
   );
 
+  // A bare glyph: no glass, no disc.
   const chromeButton = (
     icon: React.ComponentProps<typeof Ionicons>['name'],
     size: number,
-  ) =>
-    HAS_GLASS ? (
-      <GlassView
-        glassEffectStyle="regular"
-        isInteractive
-        tintColor={withAlpha(colors.text, scheme === 'dark' ? 0.22 : 0.1)}
-        colorScheme={scheme === 'dark' ? 'dark' : 'light'}
-        style={styles.chromeButtonGlass}
-      >
-        <Ionicons name={icon} size={size} color={colors.text} />
-      </GlassView>
-    ) : (
-      <View style={[styles.chromeButtonGlass, { backgroundColor: colors.surfaceAlt }]}>
-        <Ionicons name={icon} size={size} color={colors.text} />
-      </View>
-    );
+  ) => (
+    <View style={styles.chromeButtonGlass}>
+      <Ionicons name={icon} size={size} color={colors.text} />
+    </View>
+  );
 
   return (
     <View style={styles.root} pointerEvents="box-none">

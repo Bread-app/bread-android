@@ -77,8 +77,13 @@ import { getAnonymousSocialId } from '@/lib/social-identity';
 import { useSavedStore } from '@/lib/saved-store';
 import { useSandwichDetail } from '@/lib/sandwich-detail-store';
 import { useToast } from '@/lib/toast-store';
+import { useOptionalSandwichComposer } from '@/lib/sandwich-composer-store';
 import { equityLogoFallbackUris } from '@/lib/stock-logos';
 import { CandlestickChart, type ChartWindow } from './candlestick-chart';
+import { chartCallersFor, type ChartCaller, type ChartPinAnchor } from './chart-caller-pins';
+import { CallerPostPreview } from './caller-post-preview';
+import { AssetDetailTabs } from './asset-detail-tabs';
+import type { PhoenixRange } from '@/hooks/use-phoenix-live';
 import { BuySuccessSheet } from './buy-success-sheet';
 import { LineChart, type LineChartWindow } from './line-chart';
 import { SandwichCard, type SandwichCardSavedControls } from '@/components/sandwich-card';
@@ -230,6 +235,12 @@ type StockDetailSheetProps = {
    * Sandwich leg) pass its real side so the ticket matches what they own.
    */
   embeddedPerpSide?: PhoenixTradeSide;
+  /**
+   * The call this asset was opened from, then other calls on it the host
+   * already had. Their creators are pinned on the chart — the first one
+   * highlighted — and the chart opens on a window that shows it.
+   */
+  embeddedCalls?: readonly Sandwich[] | null;
   /**
    * Parent renders the native action outside this surface — because this one
    * is transformed and clipped, and (measured on iOS 26) a `GlassView` inside
@@ -1077,7 +1088,7 @@ function PositionCard({
       : null;
 
   const positive = (unrealizedPnl ?? 0) >= 0;
-  const pnlColor = positive ? '#02ED45' : colors.negative;
+  const pnlColor = positive ? '#35F046' : colors.negative;
 
   // No current value means the quote hasn't landed yet — every figure derived
   // from it (the position's worth, and both P&L readouts) is pending, not
@@ -1205,6 +1216,7 @@ function StockDetailSheet({
   embeddedPerpMarket = null,
   embeddedVenue = 'spot',
   embeddedPerpSide = 'long',
+  embeddedCalls = null,
   hideEmbeddedActions = false,
   embeddedScrollY,
   embeddedChartGestureActive,
@@ -1344,6 +1356,28 @@ function StockDetailSheet({
       else sandwichDetail.open(sandwich, options);
     },
     [embeddedStock, hideTradeSheetImmediately, onOpenSandwich, sandwichDetail],
+  );
+  // Remix from the pin preview. Read here, outside the portal, where the
+  // composer is in reach; a presented sheet steps aside first, as for a post.
+  const composer = useOptionalSandwichComposer();
+  const handleRemixSandwich = useMemo(
+    () =>
+      composer
+        ? (sandwich: Sandwich) => {
+            if (!embeddedStock) {
+              hideTradeSheetImmediately();
+              sheetRef.current?.dismiss();
+            }
+            composer.open({
+              remixOf: sandwich,
+              onCreated: (created) => {
+                toast.showToast('Your remix is live', 'success');
+                sandwichDetail.open(created);
+              },
+            });
+          }
+        : undefined,
+    [composer, embeddedStock, hideTradeSheetImmediately, sandwichDetail, toast],
   );
 
   const displaySymbol = stock
@@ -1593,6 +1627,26 @@ function StockDetailSheet({
   const [chartWindow, setChartWindow] = useState<ChartWindow>('24H');
   const [activeTab, setActiveTab] = useState<DetailTab>('sandwiches');
   const [relatedSandwiches, setRelatedSandwiches] = useState<Sandwich[]>([]);
+  // Creators on this asset, pinned on both venues' charts.
+  const chartCallers = useMemo(
+    () => chartCallersFor(embeddedCalls, relatedSandwiches),
+    [embeddedCalls, relatedSandwiches],
+  );
+  // A tapped pin's post, previewed over the blurred sheet.
+  const [previewSandwich, setPreviewSandwich] = useState<Sandwich | null>(null);
+  const [previewAt, setPreviewAt] = useState<ChartPinAnchor | null>(null);
+  const handlePressCaller = useCallback((caller: ChartCaller, at: ChartPinAnchor) => {
+    if (!caller.sandwich) return;
+    setPreviewAt(at);
+    setPreviewSandwich(caller.sandwich);
+  }, []);
+  const initialCallWindow = useMemo(
+    () => windowsForCall(embeddedCalls?.[0]?.createdAt ?? null),
+    [embeddedCalls],
+  );
+  // Read by the per-asset reset, which must not re-run when this changes.
+  const initialCallWindowRef = useRef(initialCallWindow);
+  initialCallWindowRef.current = initialCallWindow;
   const [sandwichesLoading, setSandwichesLoading] = useState(false);
   const sandwichesRequestIdRef = useRef(0);
   // Bread users holding this mint, resolved on-chain server-side.
@@ -1674,7 +1728,7 @@ function StockDetailSheet({
     setScrubChange(null);
     setChartPrice(null);
     setChartMode('line');
-    setChartWindow('24H');
+    setChartWindow(initialCallWindowRef.current.spot);
     setChartChangeByWindow({});
     setActiveTab('sandwiches');
   }, [stock?.id]);
@@ -2438,6 +2492,8 @@ function StockDetailSheet({
                           anchorPrice={basePrice}
                           showDotGrid
                           surfaceColor={sheetColors.background}
+                          callers={chartCallers}
+                          onPressCaller={handlePressCaller}
                           onScrub={handleScrub}
                           onWindowChange={handleLineWindowChange}
                           color={
@@ -2526,59 +2582,8 @@ function StockDetailSheet({
                     onShare={handleShareAsset}
                   />
 
-                  {/* Tab bar */}
-                  <View style={styles.tabBarContainer}>
-                    <ScrollView
-                      horizontal
-                      showsHorizontalScrollIndicator={false}
-                      style={styles.tabBarScroll}
-                      contentContainerStyle={styles.tabBarScrollContent}
-                    >
-                      {([
-                        { key: 'sandwiches', label: 'Sandwiches' },
-                        {
-                          key: 'holders',
-                          // Count rides on the label so the sheet advertises
-                          // how many people are in before you tap through. Null
-                          // while the count loads, and hidden at zero — a bare
-                          // pair of brackets is noise, the tab says it either way.
-                          label: 'Holders',
-                          badge: holderCount || null,
-                        },
-                        { key: 'about', label: 'About' },
-                      ] as { key: DetailTab; label: string; badge?: number | null }[]).map(
-                        ({ key, label, badge }) => {
-                        const active = activeTab === key;
-                        return (
-                          <Pressable
-                            key={key}
-                            onPress={() => setActiveTab(key)}
-                            style={styles.tabBtn}
-                            accessibilityRole="button"
-                            accessibilityLabel={badge ? `${label}, ${badge}` : label}
-                          >
-                            <Text style={active ? styles.tabLabelActive : styles.tabLabel}>
-                              {label}
-                              {/* Nested so the count inherits the tab's own size,
-                                  weight and colour, and grows with it on selection. */}
-                              {badge ? (
-                                <Text style={styles.tabCount}>
-                                  {' '}({badge > 99 ? '99+' : badge})
-                                </Text>
-                              ) : null}
-                            </Text>
-                          </Pressable>
-                        );
-                      })}
-                    </ScrollView>
-                    <LinearGradient
-                      colors={[`${sheetColors.background}00`, sheetColors.background]}
-                      start={{ x: 0, y: 0 }}
-                      end={{ x: 1, y: 0 }}
-                      style={styles.tabBarFade}
-                      pointerEvents="none"
-                    />
-                  </View>
+                  {/* Tab bar — the same one the perp view draws */}
+                  <AssetDetailTabs active={activeTab} onChange={setActiveTab} holderCount={holderCount} />
 
                   {/* Tab content — scrolls with everything else */}
                   <View style={styles.tabContent}>
@@ -2687,6 +2692,9 @@ function StockDetailSheet({
             embeddedIconUri={selectedIcon}
             embeddedWallet={solanaWallet.wallets?.[0] ?? null}
             embeddedInitialSide={perpInitialSide}
+            embeddedCallers={chartCallers}
+            onEmbeddedPressCaller={handlePressCaller}
+            embeddedInitialRange={embeddedCalls?.length ? initialCallWindow.perp : undefined}
             // Keep the fallback only while the host is morphing. Once settled,
             // the order ticket and its SL/TP editor use the same native Liquid
             // Glass buttons as the hoisted action bar.
@@ -2784,6 +2792,22 @@ function StockDetailSheet({
           onChange={handleMarketModeChange}
         />
       ) : null}
+
+      <CallerPostPreview
+        sandwich={previewSandwich}
+        anchor={previewAt}
+        onClose={() => setPreviewSandwich(null)}
+        onOpen={handleOpenSandwich}
+        onRemix={handleRemixSandwich}
+        saved={{
+          canSave,
+          isSaved: (type, id) => isSaved(type as SavedItemType, id),
+          toggleSave: async (type, id) => {
+            await toggleSave(type as SavedItemType, id);
+            return isSaved(type as SavedItemType, id);
+          },
+        }}
+      />
     </View>
   );
 
@@ -3037,6 +3061,9 @@ const makeStyles = (c: ThemeColors) => {
       position: 'relative',
       paddingTop: 10,
       paddingBottom: 0,
+      // The rail under every tab; the active one draws its own bar on top.
+      borderBottomWidth: 1,
+      borderBottomColor: c.border,
     },
     tabBarScroll: {
       overflow: 'visible',
@@ -3061,6 +3088,16 @@ const makeStyles = (c: ThemeColors) => {
       alignItems: 'center',
       justifyContent: 'center',
       paddingBottom: 10,
+    },
+    // Rests on the rail, marking the active tab.
+    tabUnderline: {
+      position: 'absolute',
+      left: 0,
+      right: 0,
+      bottom: 0,
+      height: 3,
+      borderRadius: 1.5,
+      backgroundColor: c.text,
     },
     // The holder count, set in brackets inside the tab label itself. It used to
     // be a filled pill, which read as a status chip — and on the active tab its
@@ -3588,3 +3625,19 @@ const makeContentStyles = (c: ThemeColors) => {
     },
   });
 };
+
+const HOUR_MS = 60 * 60 * 1000;
+
+/**
+ * The narrowest spot window and perp range that still show a call made at
+ * `createdAt`, so the pin the user came for is on screen when the chart lands.
+ */
+function windowsForCall(createdAt: string | null): { spot: ChartWindow; perp: PhoenixRange } {
+  const at = createdAt ? new Date(createdAt).getTime() : NaN;
+  const age = Number.isFinite(at) ? Date.now() - at : 0;
+  if (age <= 22 * HOUR_MS) return { spot: '24H', perp: '24H' };
+  if (age <= 6.5 * 24 * HOUR_MS) return { spot: '1W', perp: '7D' };
+  if (age <= 29 * 24 * HOUR_MS) return { spot: '1M', perp: '1M' };
+  // 3M is the widest either venue offers; an older call waits on the left.
+  return { spot: '3M', perp: '3M' };
+}

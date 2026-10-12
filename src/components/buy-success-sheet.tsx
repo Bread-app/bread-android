@@ -77,11 +77,11 @@ const SHARE_CARD_ICON = 72;
 
 const BRAND_GREEN = '#35F046';
 /** The app's green for text and status — `positive` in the theme. */
-const APP_GREEN = '#02ED45';
+const APP_GREEN = '#35F046';
 /** The same green as type rather than as a badge — #35F046 on white is
  *  unreadable at 15px, so numbers get the ink version of it. */
-const BRAND_GREEN_INK = '#16A34A';
-const BRAND_RED = '#EB1C40';
+const BRAND_GREEN_INK = '#35F046';
+const BRAND_RED = '#FF1F4B';
 
 /**
  * How much of the bottom edge the share + close block occupies, above the
@@ -2143,7 +2143,7 @@ const makeStyles = (c: ThemeColors) => StyleSheet.create({
     letterSpacing: -0.5,
   },
   pnlPositive: {
-    color: '#02ED45', // Crisp green
+    color: '#35F046', // Crisp green
   },
   pnlNegative: {
     color: BRAND_RED,
@@ -2330,7 +2330,7 @@ const makeStyles = (c: ThemeColors) => StyleSheet.create({
     fontFamily: F,
   },
   shareCardPnlUp: {
-    color: '#16A34A',
+    color: '#35F046',
   },
   shareCardPnlDown: {
     color: BRAND_RED,

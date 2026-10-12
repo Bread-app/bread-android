@@ -1,6 +1,7 @@
 import { LinearGradient } from 'expo-linear-gradient';
 import React, { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
+import Svg, { Path } from 'react-native-svg';
 import Animated, {
   Easing,
   cancelAnimation,
@@ -11,7 +12,6 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 
-import { AssetLogo } from '@/components/asset-logo';
 import { Fonts } from '@/constants/theme';
 import type { Stock } from '@/lib/api';
 import { withAlpha } from '@/lib/color-utils';
@@ -38,8 +38,6 @@ const FLAT = BoardTone.flat;
 const GLOW_ALPHA = 0.38;
 
 export const TICKER_HEIGHT = 34;
-/** Sits inside the tape's line height so the logo never grows the strip. */
-const LOGO_SIZE = 20;
 
 /** How far the edge fade reaches in from each side. */
 const FADE_WIDTH = 56;
@@ -67,9 +65,27 @@ function colorFor(change: number | null): string {
   return change > 0 ? UP : DOWN;
 }
 
+/** The figure alone: direction is the arrow beside it, not a +/− sign. */
 function changeLabel(change: number | null): string {
   if (change === null) return '--.--';
-  return `${change > 0 ? '+' : change < 0 ? '-' : ''}${Math.abs(change).toFixed(2)}%`;
+  return `${Math.abs(change).toFixed(2)}%`;
+}
+
+function spokenChange(change: number | null): string {
+  if (change === null) return 'no change data';
+  if (change === 0) return 'unchanged';
+  return `${change > 0 ? 'up' : 'down'} ${Math.abs(change).toFixed(2)} percent`;
+}
+
+/** A solid up / down triangle in the cell's phosphor colour, with its glow. */
+function TapeArrow({ up, color }: { up: boolean; color: string }) {
+  return (
+    <View style={[styles.arrow, { shadowColor: color }]}>
+      <Svg width={11} height={11} viewBox="0 0 12 12">
+        <Path d={up ? 'M6 1.6 L11 10.4 H1 Z' : 'M6 10.4 L11 1.6 H1 Z'} fill={color} stroke={color} strokeWidth={1.2} strokeLinejoin="round" />
+      </Svg>
+    </View>
+  );
 }
 
 function TickerCell({ stock, onSelect }: { stock: Stock; onSelect?: Props['onSelect'] }) {
@@ -85,7 +101,7 @@ function TickerCell({ stock, onSelect }: { stock: Stock; onSelect?: Props['onSel
       ref={cellRef}
       testID={isNativeZoomSource ? NATIVE_ZOOM_SOURCE_TEST_ID : undefined}
       accessibilityRole="button"
-      accessibilityLabel={`${stock.symbol} ${changeLabel(change)}`}
+      accessibilityLabel={`${stock.symbol} ${spokenChange(change)}`}
       disabled={onSelect === undefined}
       onPress={() => {
         if (!onSelect) return;
@@ -95,22 +111,9 @@ function TickerCell({ stock, onSelect }: { stock: Stock; onSelect?: Props['onSel
       }}
       style={styles.cell}
     >
-      <AssetLogo
-        uri={stock.icon}
-        size={LOGO_SIZE}
-        borderRadius={LOGO_SIZE / 2}
-        backgroundColor={HeaderPalette.control}
-        fallback={
-          <View style={styles.logoFallback}>
-            <Text style={styles.logoFallbackText}>
-              {stock.symbol.slice(0, 1).toUpperCase()}
-            </Text>
-          </View>
-        }
-      />
       <Text style={[styles.symbol, lit]}>{stock.symbol.toUpperCase()}</Text>
+      {change !== null && change !== 0 ? <TapeArrow up={change > 0} color={tone} /> : null}
       <Text style={[styles.change, lit]}>
-        {change !== null && change > 0 ? '▲' : change !== null && change < 0 ? '▼' : '▬'}
         {changeLabel(change)}
       </Text>
     </Pressable>
@@ -243,20 +246,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    paddingHorizontal: 12,
+    paddingHorizontal: 7,
   },
-  logoFallback: {
-    width: LOGO_SIZE,
-    height: LOGO_SIZE,
-    borderRadius: LOGO_SIZE / 2,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: HeaderPalette.control,
-  },
-  logoFallbackText: {
-    color: HeaderPalette.value,
-    fontSize: 10,
-    fontWeight: '700',
+  arrow: {
+    marginRight: -2,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.6,
+    shadowRadius: 4,
   },
   symbol: {
     fontFamily: F,

@@ -10,8 +10,8 @@ const F_DISPLAY = Fonts.display;
 const F_PERCENT = Fonts.displayMedium;
 const F_MONO = Fonts.mono;
 
-export const SHARE_CARD_POSITIVE = '#02ED45';
-export const SHARE_CARD_NEGATIVE = '#EB1C40';
+export const SHARE_CARD_POSITIVE = '#35F046';
+export const SHARE_CARD_NEGATIVE = '#FF1F4B';
 export const SHARE_CARD_ACCENT = '#38BDF8';
 const SHARE_CARD_INK = '#111827';
 const SHARE_CARD_MUTED = '#747C8E';

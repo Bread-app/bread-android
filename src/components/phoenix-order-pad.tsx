@@ -357,8 +357,10 @@ export function PhoenixOrderPad({
           max={maxLeverage}
           accent={accent}
           onChange={onChangeLeverage}
-          height={56}
-          slot={44}
+          // Scaled up: the ticket has room, and the leverage is the second
+          // number on it after the amount.
+          height={84}
+          slot={64}
           hideCaption
         />
       </View>

@@ -136,7 +136,7 @@ const palettesByTone: Record<
 const ICON_COLORS: Record<ToastTone, string> = {
   processing: '#38BDF8',
   success: '#35F046',
-  error: '#D2042D',
+  error: '#FF1F4B',
   info: '#38BDF8',
 };
 

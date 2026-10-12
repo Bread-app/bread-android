@@ -43,7 +43,10 @@ import { LinearGradient } from 'expo-linear-gradient';
 
 import { AssetLogo } from '@/components/asset-logo';
 import { BlurBackdrop } from '@/components/blur-backdrop';
+import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { PhoenixMarkChart } from '@/components/phoenix-mark-chart';
+import type { ChartCaller, ChartPinAnchor } from '@/components/chart-caller-pins';
+import { AssetDetailTabs } from '@/components/asset-detail-tabs';
 import { PhoenixAutoClosePad } from '@/components/phoenix-auto-close-pad';
 import { PhoenixOrderPad } from '@/components/phoenix-order-pad';
 import { SideGlassButton } from '@/components/side-glass-button';
@@ -114,7 +117,7 @@ type PhoenixDetailTab = 'about' | 'sandwiches' | 'holders';
 
 function changeTintColors(value: number | null | undefined): readonly [string, string] {
   if (value == null || value === 0) return ['#9aa3b014', '#9aa3b000'];
-  return value > 0 ? ['#35F04617', '#35F04600'] : ['#EB1C4017', '#EB1C4000'];
+  return value > 0 ? ['#35F04617', '#35F04600'] : ['#FF1F4B17', '#FF1F4B00'];
 }
 
 /**
@@ -244,6 +247,12 @@ type PhoenixMarketDetailSheetProps = {
   embeddedActiveTab?: PhoenixDetailTab;
   onEmbeddedTabChange?: (tab: PhoenixDetailTab) => void;
   embeddedSandwichesContent?: React.ReactNode;
+  /** Creators who called this market, pinned on the chart. */
+  embeddedCallers?: readonly ChartCaller[];
+  /** A tap on one of those pins. */
+  onEmbeddedPressCaller?: (caller: ChartCaller, at: ChartPinAnchor) => void;
+  /** Range the chart lands on, so the call the user came from is in view. */
+  embeddedInitialRange?: PhoenixRange;
   /** Perp-only holders list (open positions on this market), owned by the host. */
   embeddedHoldersContent?: React.ReactNode;
   /** Shown on the Holders tab label; null while loading, hidden at zero. */
@@ -351,6 +360,9 @@ const PhoenixMarketDetailSheetContent = forwardRef<
     embeddedActiveTab = 'sandwiches',
     onEmbeddedTabChange,
     embeddedSandwichesContent,
+    embeddedCallers,
+    onEmbeddedPressCaller,
+    embeddedInitialRange,
     embeddedHoldersContent,
     embeddedHolderCount = null,
     embeddedHeaderActions,
@@ -390,6 +402,9 @@ const PhoenixMarketDetailSheetContent = forwardRef<
 
     const [market, setMarket] = useState<PhoenixMarket | null>(null);
     const [range, setRange] = useState<PhoenixRange>('24H');
+    // Line by default, like spot; the switch beside the ranges flips to candles.
+    // Kept across markets — it is a preference, not part of the asset.
+    const [chartMode, setChartMode] = useState<'line' | 'candle'>('line');
     const { timeframe, bars: rangeBars } = PHOENIX_RANGES[range];
     const [live, setLive] = useState(false);
     const [account, setAccount] = useState<PhoenixAccountResponse | null>(null);
@@ -646,6 +661,12 @@ const PhoenixMarketDetailSheetContent = forwardRef<
       // eslint-disable-next-line react-hooks/exhaustive-deps -- `embeddedSymbol`
       // stands in for `embeddedMarket` on purpose; see the note above.
     }, [embeddedSymbol, embeddedInitialSide, hideOrderPadImmediately, loadAccount]);
+
+    // After the reset above, which lands every market on 24H: a market opened
+    // from a call starts on a range wide enough to show where it was made.
+    useEffect(() => {
+      if (embeddedSymbol && embeddedInitialRange) setRange(embeddedInitialRange);
+    }, [embeddedSymbol, embeddedInitialRange]);
 
     useEffect(() => {
       if (!embeddedMarket) return;
@@ -1510,6 +1531,14 @@ const PhoenixMarketDetailSheetContent = forwardRef<
                   initialVisibleCandles={rangeBars}
                   markPrice={markPrice}
                   hideAxis
+                  callers={embeddedCallers}
+                  onPressCaller={onEmbeddedPressCaller}
+                  variant={chartMode}
+                  lineColor={
+                    change == null || change.changePercent >= 0
+                      ? colors.chartPositive
+                      : colors.chartNegative
+                  }
                 />
               )}
 
@@ -1537,7 +1566,24 @@ const PhoenixMarketDetailSheetContent = forwardRef<
                     );
                   })}
                 </View>
-                <View style={styles.chartControlSpacer} pointerEvents="none" />
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={
+                    chartMode === 'line' ? 'Switch to candlestick chart' : 'Switch to line chart'
+                  }
+                  onPress={() => {
+                    void Haptics.selectionAsync();
+                    setChartMode((mode) => (mode === 'line' ? 'candle' : 'line'));
+                  }}
+                  hitSlop={8}
+                  style={styles.chartControlSpacer}
+                >
+                  <MaterialCommunityIcons
+                    name={chartMode === 'line' ? 'chart-timeline-variant' : 'pulse'}
+                    size={22}
+                    color={colors.actionBuy}
+                  />
+                </Pressable>
               </View>
 
               {error && markPrice === null ? (
@@ -1546,29 +1592,11 @@ const PhoenixMarketDetailSheetContent = forwardRef<
 
               {embeddedMarket ? (
                 <>
-                  <View style={styles.tabBarContainer}>
-                    <View style={styles.tabBarRow}>
-                      {(['sandwiches', 'holders', 'about'] as const).map((tab) => {
-                        const active = embeddedActiveTab === tab;
-                        const badge = tab === 'holders' ? embeddedHolderCount || null : null;
-                        return (
-                          <Pressable
-                            key={tab}
-                            accessibilityRole="button"
-                            accessibilityLabel={`Show ${tab}`}
-                            accessibilityState={{ selected: active }}
-                            onPress={() => onEmbeddedTabChange?.(tab)}
-                            style={styles.tabButton}
-                          >
-                            <Text style={active ? styles.tabLabelActive : styles.tabLabel}>
-                              {tab === 'about' ? 'About' : tab === 'sandwiches' ? 'Sandwiches' : 'Holders'}
-                              {badge ? ` (${badge > 99 ? '99+' : badge})` : ''}
-                            </Text>
-                          </Pressable>
-                        );
-                      })}
-                    </View>
-                  </View>
+                  <AssetDetailTabs
+                    active={embeddedActiveTab}
+                    onChange={(tab) => onEmbeddedTabChange?.(tab)}
+                    holderCount={embeddedHolderCount}
+                  />
                   <View style={styles.tabContent}>
                     {embeddedActiveTab === 'about'
                       ? perpAboutContent
@@ -2008,7 +2036,7 @@ const makeStyles = (c: ThemeColors) =>
       marginTop: 10,
       paddingHorizontal: 4,
     },
-    chartControlSpacer: { width: 34, height: 40 },
+    chartControlSpacer: { width: 34, height: 40, alignItems: 'center', justifyContent: 'center' },
     tfRow: {
       flex: 1,
       flexDirection: 'row',

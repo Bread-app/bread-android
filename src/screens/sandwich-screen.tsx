@@ -73,6 +73,7 @@ import {
 import { VerifiedBadge } from "@/components/verified-badge";
 import { FollowButton } from "@/components/follow-button";
 import { AssetLogo as RemoteAssetLogo } from "@/components/asset-logo";
+import { AllocationBand, allocationColor } from "@/components/allocation-band";
 import { PressableScale } from "@/components/pressable-scale";
 import { NewsFeed } from "@/components/news/news-feed";
 import { markLegTapHintSeen, shouldShowLegTapHint } from "@/lib/leg-tap-hint";
@@ -3210,7 +3211,18 @@ function ComposerReviewView({
           </Pressable>
         </View>
       ) : (
-        draft.legs.map((leg, index) => (
+        <>
+        {legCount > 1 ? (
+          // One band for the whole basket: drag a seam and the two legs either
+          // side of it trade weight, so the split always totals 100%.
+          <AllocationBand
+            legs={draft.legs.map((leg) => ({ id: leg.id, symbol: leg.symbol ?? leg.label, imageUrl: leg.imageUrl }))}
+            ratios={ratios}
+            onLive={setLiveRatios}
+            onCommit={onCommitRatios}
+          />
+        ) : null}
+        {draft.legs.map((leg, index) => (
           <ComposerLegRow
             key={leg.id}
             leg={leg}
@@ -3221,9 +3233,11 @@ function ComposerReviewView({
             initialPct={initialPercents[index] ?? 0}
             onRemove={() => onRemoveLeg(leg.id)}
             onCommitRatios={onCommitRatios}
-            sliderDisabled={legCount <= 1}
+            sliderDisabled
+            swatch={legCount > 1 ? allocationColor(index) : undefined}
           />
-        ))
+        ))}
+        </>
       )}
 
       {draft.legs.length > 0 ? (
@@ -3413,6 +3427,7 @@ function ComposerLegRow({
   onRemove,
   onCommitRatios,
   sliderDisabled = false,
+  swatch,
 }: {
   leg: SandwichLeg;
   index: number;
@@ -3427,6 +3442,8 @@ function ComposerLegRow({
   // Commit the final ratios array to React state (called once, on gesture end).
   onCommitRatios: (ratios: number[]) => void;
   sliderDisabled?: boolean;
+  /** This leg's colour in the allocation band, shown beside its figure. */
+  swatch?: string;
 }) {
   const styles = useThemedStyles(makeStyles);
   const { colors } = useThemeStore();
@@ -3473,6 +3490,7 @@ function ComposerLegRow({
                 : "prediction market"}
           </Text>
         </View>
+        {swatch ? <View style={[styles.composerLegSwatch, { backgroundColor: swatch }]} /> : null}
         <Text style={styles.composerAllocationPct}>{percent}%</Text>
         <PressableScale
           accessibilityRole="button"
@@ -3556,8 +3574,8 @@ function MiniSparkline({ seed, up }: { seed: string; up: boolean }) {
     return { line: linePath, area: areaPath };
   }, [seed, up]);
 
-  const stroke = up ? "#22C55E" : "#EB1C40";
-  const fill = up ? "rgba(34,197,94,0.12)" : "rgba(255,51,201,0.12)";
+  const stroke = up ? "#35F046" : "#FF1F4B";
+  const fill = up ? "rgba(53, 240, 70,0.12)" : "rgba(255,51,201,0.12)";
 
   return (
     <Svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none">
@@ -6994,9 +7012,7 @@ export function SandwichScreen() {
                 onRefresh={() => void loadNews(true)}
                 bottomInset={composeFabBottom + 56}
                 onOpenStory={openNewsStory}
-                // A ticker chip is too small to grow out of, so the asset
-                // route presents from the bottom edge — same screen as anywhere.
-                onOpenStock={(stock) => openStockRoute(stock)}
+                onOpenStock={(stock) => openStockRoute(stock, { asScreen: true })}
               />
             </View>
           </Animated.View>
@@ -7291,7 +7307,7 @@ const makeStyles = (c: ThemeColors) => {
     justifyContent: "center",
   },
   composerNavCancelText: {
-    color: ink("#EB1C40", "#EB1C40"),
+    color: ink("#FF1F4B", "#FF1F4B"),
     fontSize: 16,
     fontWeight: "700",
     fontFamily: F,
@@ -7699,7 +7715,7 @@ const makeStyles = (c: ThemeColors) => {
     width: 52,
     height: 52,
     borderRadius: 26,
-    backgroundColor: "#22C55E",
+    backgroundColor: "#35F046",
   },
   believeInput: {
     flex: 1,
@@ -7930,7 +7946,7 @@ const makeStyles = (c: ThemeColors) => {
     width: 28,
     height: 28,
     borderRadius: 14,
-    backgroundColor: "#22C55E",
+    backgroundColor: "#35F046",
     alignItems: "center",
     justifyContent: "center",
   },
@@ -7991,10 +8007,10 @@ const makeStyles = (c: ThemeColors) => {
     fontFamily: F_DISPLAY_MEDIUM,
   },
   stockChangeUp: {
-    color: ink("#16A34A", "#4ade80"),
+    color: ink("#35F046", "#35F046"),
   },
   stockChangeDown: {
-    color: ink("#EB1C40", "#EB1C40"),
+    color: ink("#FF1F4B", "#FF1F4B"),
   },
   comingSoonWrap: {
     paddingTop: 56,
@@ -8135,13 +8151,13 @@ const makeStyles = (c: ThemeColors) => {
     fontFamily: F,
   },
   legConfigRemove: {
-    backgroundColor: wash("#EB1C40", "#FFEFF1"),
+    backgroundColor: wash("#FF1F4B", "#FFEFF1"),
     paddingHorizontal: 16,
     paddingVertical: 10,
     borderRadius: 20,
   },
   legConfigRemoveText: {
-    color: ink("#EB1C40", "#EB1C40"),
+    color: ink("#FF1F4B", "#FF1F4B"),
     fontSize: 14,
     fontWeight: "800",
     fontFamily: F,
@@ -8670,7 +8686,7 @@ const makeStyles = (c: ThemeColors) => {
   signalPercent: {
     marginTop: 2,
     width: 84,
-    color: ink("#067647", "#4ade80"),
+    color: ink("#35F046", "#35F046"),
     fontSize: 19,
     lineHeight: 23,
     fontWeight: "900",
@@ -9196,7 +9212,7 @@ const makeStyles = (c: ThemeColors) => {
     borderRadius: 4,
   },
   legSidePillYes: {
-    backgroundColor: wash("#22C55E", "#e7f8ec"),
+    backgroundColor: wash("#35F046", "#e7f8ec"),
   },
   legSidePillNo: {
     backgroundColor: wash(c.negative, "#ffe9f5"),
@@ -9208,7 +9224,7 @@ const makeStyles = (c: ThemeColors) => {
     fontFamily: F,
   },
   legSidePillTextYes: {
-    color: ink("#137a3a", "#4ade80"),
+    color: ink("#35F046", "#35F046"),
   },
   legSidePillTextNo: {
     color: c.actionSell,
@@ -9913,12 +9929,12 @@ const makeStyles = (c: ThemeColors) => {
     marginTop: 2,
     padding: 12,
     borderRadius: 14,
-    backgroundColor: wash("#EB1C40", "#FFEFF1"),
+    backgroundColor: wash("#FF1F4B", "#FFEFF1"),
     borderWidth: 1,
-    borderColor: ink("#FFD2D9", withAlpha("#EB1C40", 0.4)),
+    borderColor: ink("#FFD2D9", withAlpha("#FF1F4B", 0.4)),
   },
   thesisComposerErrorText: {
-    color: ink("#EB1C40", "#FF5A70"),
+    color: ink("#FF1F4B", "#FF5A70"),
     fontSize: 14,
     lineHeight: 20,
     fontWeight: "700",
@@ -10433,10 +10449,10 @@ const makeStyles = (c: ThemeColors) => {
     borderRadius: 6,
   },
   previewLegSideChipLong: {
-    backgroundColor: wash("#22C55E", "#E6F9EC"),
+    backgroundColor: wash("#35F046", "#E6F9EC"),
   },
   previewLegSideChipShort: {
-    backgroundColor: wash("#EB1C40", "#FFEFF1"),
+    backgroundColor: wash("#FF1F4B", "#FFEFF1"),
   },
   previewLegSideLabel: {
     fontSize: 10,
@@ -10445,10 +10461,10 @@ const makeStyles = (c: ThemeColors) => {
     fontFamily: Fonts.sans,
   },
   previewLegSideLabelLong: {
-    color: ink("#059669", "#4ade80"),
+    color: ink("#35F046", "#35F046"),
   },
   previewLegSideLabelShort: {
-    color: ink("#EB1C40", "#EB1C40"),
+    color: ink("#FF1F4B", "#FF1F4B"),
   },
   previewLegSubtitle: {
     marginTop: 4,
@@ -10480,7 +10496,7 @@ const makeStyles = (c: ThemeColors) => {
     fontWeight: "900",
   },
   composerLegsTotalWarn: {
-    color: ink("#EB1C40", "#FF5A70"),
+    color: ink("#FF1F4B", "#FF5A70"),
   },
   composerLegEmpty: {
     backgroundColor: c.background,
@@ -10510,6 +10526,7 @@ const makeStyles = (c: ThemeColors) => {
     gap: 4,
     marginBottom: 8,
   },
+  composerLegSwatch: { width: 10, height: 10, borderRadius: 5 },
   composerLegHead: {
     flexDirection: "row",
     alignItems: "center",
@@ -10832,7 +10849,7 @@ const makeStyles = (c: ThemeColors) => {
     borderColor: c.text,
   },
   pickerWeightInputWrapWarn: {
-    borderColor: ink("#FFD2D9", withAlpha("#EB1C40", 0.4)),
+    borderColor: ink("#FFD2D9", withAlpha("#FF1F4B", 0.4)),
   },
   pickerWeightInputBig: {
     color: c.text,
@@ -10853,7 +10870,7 @@ const makeStyles = (c: ThemeColors) => {
   },
   pickerWeightWarn: {
     marginTop: 8,
-    color: ink("#EB1C40", "#FF5A70"),
+    color: ink("#FF1F4B", "#FF5A70"),
     fontSize: 12,
     fontWeight: "700",
     fontFamily: F,

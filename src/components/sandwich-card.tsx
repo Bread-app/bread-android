@@ -290,8 +290,8 @@ export function CardAssetIcons({ legs }: { legs: SandwichLeg[] }) {
         >
           <RemoteAssetLogo
             uri={leg.imageUrl}
-            size={24}
-            borderRadius={12}
+            size={20}
+            borderRadius={10}
             backgroundColor={colors.surfaceAlt}
             borderWidth={2}
             borderColor={colors.surfaceAlt}
@@ -303,7 +303,7 @@ export function CardAssetIcons({ legs }: { legs: SandwichLeg[] }) {
                       ? "ribbon-outline"
                       : "bar-chart-outline"
                   }
-                  size={13}
+                  size={11}
                   color={colors.text}
                 />
               </View>
@@ -674,6 +674,7 @@ export const SandwichCard = React.memo(function SandwichCard({
   onShare,
   showShare = true,
   showRemix = true,
+  onRemix,
   saved,
   layout = "post",
 }: {
@@ -686,6 +687,11 @@ export const SandwichCard = React.memo(function SandwichCard({
   showShare?: boolean;
   /** The main Sandwich feed leaves Remix to the detail screen. */
   showRemix?: boolean;
+  /**
+   * Remix handler from a host that can reach the composer when this card
+   * cannot (a portalled sheet). Shows Remix even without the context.
+   */
+  onRemix?: (sandwich: Sandwich) => void;
   /**
    * Save controls, for a host that renders this card inside a portalled sheet.
    * There the saved store is out of reach and reading it directly is a render
@@ -789,7 +795,7 @@ export const SandwichCard = React.memo(function SandwichCard({
       </View>
     </PressableScale>
     {/* The feed-row layout leaves Remix to the sandwich's own screen. */}
-    {showRemix && layout !== "holding" && composer ? (
+    {showRemix && layout !== "holding" && (onRemix || composer) ? (
       <PressableScale
         accessibilityRole="button"
         accessibilityLabel="Remix sandwich"
@@ -797,7 +803,11 @@ export const SandwichCard = React.memo(function SandwichCard({
         onPress={(event) => {
           event.stopPropagation();
           void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-          composer.open({
+          if (onRemix) {
+            onRemix(sandwich);
+            return;
+          }
+          composer?.open({
             remixOf: sandwich,
             onCreated: (created) => {
               toast.showToast("Your remix is live", "success");
@@ -1747,19 +1757,14 @@ const makeStyles = (c: ThemeColors) => StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 8,
-    minHeight: 40,
-    paddingHorizontal: 11,
-    paddingVertical: 5,
+    gap: 6,
+    minHeight: 30,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
     borderRadius: 999,
-    // Match the card instead of painting a grey chip; elevation alone defines
-    // the pill, so the asset stack and P&L stay visually light.
-    backgroundColor: c.background,
-    shadowColor: c.shadow,
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: c.background === "#ffffff" ? 0.13 : 0.34,
-    shadowRadius: 8,
-    elevation: 3,
+    // A flat grey chip; the logo rings share its fill, so each circle cuts
+    // cleanly out of the one beneath it.
+    backgroundColor: c.surfaceAlt,
     flexShrink: 1,
     minWidth: 0,
   },
@@ -1817,9 +1822,9 @@ const makeStyles = (c: ThemeColors) => StyleSheet.create({
     overflow: "hidden",
   },
   cardLegsStackFallback: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
     borderWidth: 2,
     borderColor: c.surfaceAlt,
     backgroundColor: c.border,
@@ -1827,7 +1832,7 @@ const makeStyles = (c: ThemeColors) => StyleSheet.create({
     justifyContent: "center",
   },
   cardLegsStackOverlap: {
-    marginLeft: -10,
+    marginLeft: -8,
   },
   cardPnlCoverage: {
     fontSize: 11,
@@ -1838,7 +1843,7 @@ const makeStyles = (c: ThemeColors) => StyleSheet.create({
   cardPnlInline: {
     // Never yields width — the icon stack shrinks first.
     flexShrink: 0,
-    fontSize: 15,
+    fontSize: 13,
     fontWeight: "700",
     fontFamily: F_DISPLAY_MEDIUM,
     letterSpacing: -0.3,

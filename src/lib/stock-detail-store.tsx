@@ -9,7 +9,7 @@ import React, {
 } from 'react';
 
 import type { AssetMarketMode } from '@/components/asset-market-toggle';
-import type { Stock } from '@/lib/api';
+import type { Sandwich, Stock } from '@/lib/api';
 import { NATIVE_ZOOM_SPIKE, openWithNativeZoom } from '@/lib/native-zoom';
 import type { PhoenixMarket, PhoenixTradeSide } from '@/lib/phoenix-api';
 import type { ZoomSourceRect } from '@/lib/zoom-transition';
@@ -36,6 +36,17 @@ export type StockDetailOpenOptions = {
    * the spot page, and for a short leg a spot BUY is the opposite of the thesis.
    */
   hideActions?: boolean;
+  /**
+   * The call this asset was opened from, then other calls on it the caller
+   * already holds. Their creators are pinned on the chart.
+   */
+  calls?: Sandwich[];
+  /**
+   * Push as an ordinary full screen — slide in, edge-swipe back — instead of
+   * zooming out of the tapped row. For sources too small or too mobile to grow
+   * a page out of (the ticker tape), where the zoom reads as a pull-down drawer.
+   */
+  asScreen?: boolean;
 };
 
 type StockDetailState = {
@@ -93,8 +104,9 @@ export function StockDetailProvider({
       // Android has no UIKit zoom, and the JS zoom (a transparent modal that
       // scales a heavy screen while the list keeps rendering underneath) is the
       // most expensive transition in the app there. Push the plain native
-      // route instead; it gets the platform's own transition.
-      if (Platform.OS === 'android') {
+      // route instead; it gets the platform's own transition. Elsewhere, no
+      // source marker (`asScreen`) also means a plain push.
+      if (Platform.OS === 'android' || options?.asScreen) {
         router.push('/stock-detail-native');
         return;
       }

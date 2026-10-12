@@ -3,7 +3,7 @@ import { useFocusEffect } from "@react-navigation/native";
 import { useRouter } from "expo-router";
 import * as Haptics from "expo-haptics";
 import { setStatusBarStyle } from "expo-status-bar";
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   RefreshControl,
   StyleSheet,
@@ -34,10 +34,14 @@ import { BestCallsSection } from "@/components/home/best-calls-section";
 import { TICKER_HEIGHT, TickerTape } from "@/components/home/ticker-tape";
 import { BottomTabInset, Fonts, type ThemeColors } from "@/constants/theme";
 import { useThemedStyles } from "@/hooks/use-themed-styles";
-import type { Sandwich } from "@/lib/api";
+import { getSavedStock, type Sandwich, type SandwichLeg, type Stock } from "@/lib/api";
+import { legTicker, legsShareAsset } from "@/lib/call-attribution";
 import { withAlpha } from "@/lib/color-utils";
 import { prefetchExploreFeed } from "@/lib/explore-feed";
+import { listPhoenixMarkets, type PhoenixMarket } from "@/lib/phoenix-api";
+import { findPhoenixMarketForAsset } from "@/lib/phoenix-symbol";
 import { useSandwichComposer } from "@/lib/sandwich-composer-store";
+import { stockPreviewFromLeg } from "@/lib/sandwich-feed";
 import { useSandwichDetail } from "@/lib/sandwich-detail-store";
 import { useStockDetail } from "@/lib/stock-detail-store";
 import { useThemeStore } from "@/lib/theme-store";
@@ -85,13 +89,117 @@ export function HomeScreen() {
   const portfolio = useHomePortfolio();
   const calls = useHomeCalls();
   const { open: openSandwichDetail } = useSandwichDetail();
-  const openSandwich = useCallback((sandwich: Sandwich) => {
-    void Haptics.selectionAsync();
-    openSandwichDetail(sandwich);
-  }, [openSandwichDetail]);
   const movers = useHomeMovers();
   const refreshMovers = movers.refresh;
-  const { open: openStock } = useStockDetail();
+  const {
+    open: openStock,
+    update: updateStock,
+    updateOptions: updateStockOptions,
+  } = useStockDetail();
+
+  // Warmed on mount (the list is cached and single-flighted), so a tapped call
+  // usually knows its perp market on the tap frame and lands on perp directly.
+  const [perpMarkets, setPerpMarkets] = useState<PhoenixMarket[] | null>(null);
+  useEffect(() => {
+    let active = true;
+    void listPhoenixMarkets()
+      .then((markets) => {
+        if (active) setPerpMarkets(markets);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  // Trending quotes each call at its perp market's max leverage, when one exists.
+  const maxLeverageFor = useCallback((leg: SandwichLeg) => {
+    if (!perpMarkets || leg.type !== "tokenized_stock") return null;
+    const ticker = legTicker(leg);
+    const market =
+      findPhoenixMarketForAsset(perpMarkets, { symbol: ticker }) ??
+      findPhoenixMarketForAsset(perpMarkets, { symbol: ticker, category: "crypto" });
+    return market ? market.maxLeverage : null;
+  }, [perpMarkets]);
+
+  // A single-asset call opens that asset's page — on perp when a Phoenix
+  // market backs it, else spot — with the caller and everyone else in the feed
+  // who called the same asset pinned on the chart. Baskets keep the sandwich.
+  const callRequestRef = useRef(0);
+  const openCall = useCallback((sandwich: Sandwich) => {
+    void Haptics.selectionAsync();
+    const leg = sandwich.legs.length === 1 ? sandwich.legs[0] : null;
+    if (!leg || leg.type !== "tokenized_stock") {
+      openSandwichDetail(sandwich);
+      return;
+    }
+    const ticker = legTicker(leg);
+    // A leg carries no asset class, so try it as an equity, then as crypto.
+    const marketFor = (markets: readonly PhoenixMarket[]) =>
+      findPhoenixMarketForAsset(markets, { symbol: ticker }) ??
+      findPhoenixMarketForAsset(markets, { symbol: ticker, category: "crypto" });
+    const knownMarket = perpMarkets ? marketFor(perpMarkets) : null;
+    // A perp leg can carry no mint; its Phoenix market is then the asset.
+    const preview: Stock | null =
+      stockPreviewFromLeg(leg) ??
+      (knownMarket
+        ? {
+            id: `phoenix:${knownMarket.symbol}`,
+            symbol: knownMarket.symbol,
+            name: knownMarket.name,
+            type: "token",
+            category: knownMarket.category,
+            holderCount: null,
+            icon: knownMarket.iconUri ?? knownMarket.logoUri ?? leg.imageUrl,
+            usdPrice: null,
+            priceChange1h: null,
+            priceChange24h: null,
+            volume24h: null,
+          }
+        : null);
+    if (!preview) {
+      openSandwichDetail(sandwich);
+      return;
+    }
+
+    const others = calls.posts
+      .flatMap((post) => post.sandwiches)
+      .filter((other) => other.id !== sandwich.id && other.legs.some((l) => legsShareAsset(l, leg)));
+    const short = sandwich.direction === "down" || /^(short|sell)$/i.test(leg.side);
+    // The side is always named, so the page holds perp even for someone who
+    // already owns the stock (an unnamed side would latch them onto spot).
+    const perpOptions = (market: PhoenixMarket) => ({
+      venue: "perp" as const,
+      perpMarket: market,
+      side: short ? ("short" as const) : ("long" as const),
+    });
+
+    const requestId = ++callRequestRef.current;
+    openStock(preview, {
+      asScreen: true,
+      calls: [sandwich, ...others],
+      ...(knownMarket ? perpOptions(knownMarket) : {}),
+    });
+
+    if (!preview.id.startsWith("phoenix:")) {
+      void getSavedStock(preview.id)
+        .then((resolved) => {
+          if (resolved && requestId === callRequestRef.current) updateStock(resolved);
+        })
+        .catch(() => {});
+    }
+    // Markets not warm yet: resolve the venue into the already-open screen.
+    if (!perpMarkets) {
+      void listPhoenixMarkets()
+        .then((markets) => {
+          if (requestId !== callRequestRef.current) return;
+          setPerpMarkets(markets);
+          const market = marketFor(markets);
+          if (market) updateStockOptions(perpOptions(market));
+        })
+        .catch(() => {});
+    }
+  }, [calls.posts, openStock, openSandwichDetail, perpMarkets, updateStock, updateStockOptions]);
 
   const [refreshing, setRefreshing] = useState(false);
   // The board rides INSIDE the scroll content rather than floating over it, so
@@ -188,9 +296,20 @@ export function HomeScreen() {
   const selectTapeStock = useCallback<NonNullable<React.ComponentProps<typeof TickerTape>["onSelect"]>>(
     (stock, source, nativeSourceKey) => {
       void Haptics.selectionAsync();
-      openStock(stock, { source, nativeSourceKey });
+      // Perp first whenever a Phoenix market backs the asset.
+      const market = perpMarkets
+        ? findPhoenixMarketForAsset(perpMarkets, stock)
+        : null;
+      openStock(stock, {
+        source,
+        nativeSourceKey,
+        asScreen: true,
+        ...(market
+          ? { venue: "perp" as const, perpMarket: market, side: "long" as const }
+          : {}),
+      });
     },
-    [openStock],
+    [openStock, perpMarkets],
   );
 
   return (
@@ -268,7 +387,8 @@ export function HomeScreen() {
             posts={calls.posts}
             loading={calls.loading}
             failed={calls.failed}
-            onSelect={openSandwich}
+            maxLeverageFor={maxLeverageFor}
+            onSelect={openCall}
             onRetry={retryCalls}
           />
         </View>
