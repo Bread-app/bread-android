@@ -18,11 +18,11 @@ const F = Fonts.rounded;
 
 /**
  * Home's feed: every call — podcast moments, X posts, any asset. Top ranks by
- * return since it was posted; Recent is newest first. Ticker and return, who
+ * return since it was posted; New is newest first. Ticker and return, who
  * and when.
  */
 
-const SORTS = ['Top', 'Recent'] as const;
+const SORTS = ['Top', 'New'] as const;
 type CallSort = (typeof SORTS)[number];
 
 type CallRow = {
@@ -79,9 +79,10 @@ export const BestCallsSection = React.memo(function BestCallsSection({
 
   return (
     <View style={styles.section}>
+      {/* The title names what the list is; the toggle only says how it's sorted. */}
       <View style={styles.header}>
-        <Text style={styles.title}>Trending</Text>
-        <GlassSegmentedControl options={SORTS} value={sort} onChange={setSort} accessibilityLabel="Sort calls" />
+        <Text style={styles.title}>Trades</Text>
+        <GlassSegmentedControl options={SORTS} value={sort} onChange={setSort} accessibilityLabel="Sort trades" />
       </View>
 
       {loading && rows.length === 0 ? (
@@ -109,7 +110,7 @@ export const BestCallsSection = React.memo(function BestCallsSection({
 });
 
 /** A solid up / down triangle in place of the +/− sign. */
-function TrendArrow({ up, color, size = 13 }: { up: boolean; color: string; size?: number }) {
+function TrendArrow({ up, color, size = 11 }: { up: boolean; color: string; size?: number }) {
   return (
     <Svg width={size} height={size} viewBox="0 0 12 12" style={styles0.arrow}>
       <Path d={up ? 'M6 1.6 L11 10.4 H1 Z' : 'M6 10.4 L11 1.6 H1 Z'} fill={color} strokeLinejoin="round" stroke={color} strokeWidth={1.2} />
@@ -166,17 +167,17 @@ function CallRowView({ row, onPress }: { row: CallRow; onPress: () => void }) {
         <View style={styles.byline}>
           <AssetLogo
             uri={row.sourceAvatarUrl}
-            size={18}
+            size={16}
             backgroundColor={colors.surfaceAlt}
-            fallback={<LogoFallback letter={row.sourceName.replace(/^@/, '')} size={18} />}
+            fallback={<LogoFallback letter={row.sourceName.replace(/^@/, '')} size={16} />}
           />
           <Text style={styles.footnote} numberOfLines={1}>
             {row.sourceName}
           </Text>
           {row.platform === 'youtube' ? (
-            <Ionicons name="logo-youtube" size={15} color="#FF0000" />
+            <Ionicons name="logo-youtube" size={13} color="#FF0000" />
           ) : row.platform === 'x' ? (
-            <Ionicons name="logo-x" size={13} color={colors.text} />
+            <Ionicons name="logo-x" size={12} color={colors.text} />
           ) : null}
           {row.coCallers.length > 0 ? <CoCallerStack callers={row.coCallers} /> : null}
           <View style={styles.returnWrap}>
@@ -191,7 +192,7 @@ function CallRowView({ row, onPress }: { row: CallRow; onPress: () => void }) {
   );
 }
 
-const FACE = 20;
+const FACE = 18;
 const FACE_RING = 1.5;
 
 /**
@@ -227,12 +228,12 @@ function CoCallerStack({ callers }: { callers: CoCaller[] }) {
   );
 }
 
-const LOGO_SLOT = 44;
+const LOGO_SLOT = 38;
 /**
  * Every row reserves this width for its logos, so a single 38pt logo and a
  * two-logo stack both leave the ticker at the same x.
  */
-const LOGO_COLUMN = 53;
+const LOGO_COLUMN = 46;
 // Two is all the column can hold legibly; three crushed the back ones to slivers.
 const CLUSTER_MAX = 2;
 /**
@@ -240,7 +241,7 @@ const CLUSTER_MAX = 2;
  * the whole stack fits the shared logo column so every ticker lines up.
  * Logo size per count; the overlap is whatever squeezes the row into the slot.
  */
-const CLUSTER_LOGO: Record<number, number> = { 2: 30 };
+const CLUSTER_LOGO: Record<number, number> = { 2: 26 };
 const CLUSTER_RING = 2;
 
 const legSymbol = legTicker;
@@ -409,33 +410,26 @@ const makeStyles = (c: ThemeColors) =>
   StyleSheet.create({
     section: {},
     header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 },
-    title: {
-      color: c.text,
-      fontSize: 22,
-      lineHeight: 28,
-      fontWeight: '800',
-      fontFamily: F,
-      letterSpacing: -0.3,
-    },
-    row: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, paddingTop: 18 },
+    title: { color: c.text, fontFamily: F, fontSize: 20, lineHeight: 26, fontWeight: '800', letterSpacing: -0.3 },
+    row: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, paddingTop: 13 },
     logoRow: { flexDirection: 'row', alignItems: 'center', width: LOGO_COLUMN, height: LOGO_SLOT },
     clusterItem: { borderColor: c.background, overflow: 'hidden' },
-    body: { flex: 1, minWidth: 0, paddingBottom: 18, gap: 5 },
-    headline: { flexDirection: 'row', alignItems: 'center', minHeight: 25 },
-    ticker: { flexShrink: 1, color: c.text, fontFamily: F, fontSize: 18, lineHeight: 23, fontWeight: '800' },
-    tickerMore: { color: c.textTertiary, fontSize: 15, fontWeight: '700' },
-    side: { marginLeft: 8, fontFamily: Fonts.displayOne, fontSize: 15, lineHeight: 20, letterSpacing: 0.3 },
+    body: { flex: 1, minWidth: 0, paddingBottom: 13, gap: 3 },
+    headline: { flexDirection: 'row', alignItems: 'center', minHeight: 21 },
+    ticker: { flexShrink: 1, color: c.text, fontFamily: F, fontSize: 16, lineHeight: 21, fontWeight: '800' },
+    tickerMore: { color: c.textTertiary, fontSize: 13, fontWeight: '700' },
+    side: { marginLeft: 8, fontFamily: Fonts.displayOne, fontSize: 13, lineHeight: 18, letterSpacing: 0.3 },
     // Nudged up to sit on the ticker's cap height, and faded under the figures.
-    time: { marginLeft: 'auto', paddingLeft: 8, alignSelf: 'flex-start', marginTop: 0, opacity: 0.55, color: c.textTertiary, fontFamily: F, fontSize: 12, lineHeight: 16, fontWeight: '500', fontVariant: ['tabular-nums'] },
+    time: { marginLeft: 'auto', paddingLeft: 8, alignSelf: 'flex-start', marginTop: 0, opacity: 0.55, color: c.textTertiary, fontFamily: F, fontSize: 11, lineHeight: 15, fontWeight: '500', fontVariant: ['tabular-nums'] },
     returnWrap: { marginLeft: 'auto', paddingLeft: 8, flexDirection: 'row', alignItems: 'center' },
-    returnPct: { textAlign: 'right', fontFamily: Fonts.displayMedium, fontSize: 17, lineHeight: 23, letterSpacing: 0.3, fontVariant: ['tabular-nums'] },
+    returnPct: { textAlign: 'right', fontFamily: Fonts.displayMedium, fontSize: 15, lineHeight: 20, letterSpacing: 0.3, fontVariant: ['tabular-nums'] },
     coCallers: { flexDirection: 'row', alignItems: 'center', marginLeft: 3 },
     coCallerFace: { borderRadius: FACE / 2 + FACE_RING, borderWidth: FACE_RING, borderColor: c.background, overflow: 'hidden' },
-    coCallerMore: { marginLeft: 4, color: c.textSecondary, fontFamily: F, fontSize: 12, fontWeight: '800', fontVariant: ['tabular-nums'] },
+    coCallerMore: { marginLeft: 4, color: c.textSecondary, fontFamily: F, fontSize: 11, fontWeight: '800', fontVariant: ['tabular-nums'] },
     byline: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 1 },
-    footnote: { flexShrink: 1, color: c.textTertiary, fontFamily: F, fontSize: 14, lineHeight: 18, fontWeight: '600', fontVariant: ['tabular-nums'] },
+    footnote: { flexShrink: 1, color: c.textTertiary, fontFamily: F, fontSize: 13, lineHeight: 17, fontWeight: '600', fontVariant: ['tabular-nums'] },
     logoFallback: { alignItems: 'center', justifyContent: 'center', backgroundColor: c.surfaceAlt },
     logoFallbackText: { color: c.textSecondary, fontFamily: F, fontWeight: '900' },
-    skeleton: { height: 70 * 3, borderRadius: Radius.lg, backgroundColor: c.surfaceAlt },
+    skeleton: { height: 60 * 3, borderRadius: Radius.lg, backgroundColor: c.surfaceAlt },
     emptyText: { color: c.textTertiary, fontFamily: F, fontSize: 14, fontWeight: '600', paddingVertical: 14 },
   });
