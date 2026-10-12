@@ -9,6 +9,7 @@
     "userInterfaceStyle": "automatic",
     "android": {
       "package": "com.breadapp.fun",
+      "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "backgroundColor": "#0AFE0B",
         "foregroundImage": "./assets/images/android-icon-foreground.png",

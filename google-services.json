@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "387690692755",
+    "project_id": "bread---trade-financial-ideas",
+    "storage_bucket": "bread---trade-financial-ideas.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:387690692755:android:e0ab7ea504db5c59d2cd66",
+        "android_client_info": {
+          "package_name": "com.breadapp.fun"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyB3IvohtZxtstaHAizgPFkRHBg_U6g4kXo"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
